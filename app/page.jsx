@@ -30,6 +30,12 @@ export default function Home() {
   const [exerciseSaving, setExerciseSaving] = useState(false);
   const [plan, setPlan] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
+  const [measurements, setMeasurements] = useState([]);
+  const [measurementValue, setMeasurementValue] = useState('');
+  const [measurementMethod, setMeasurementMethod] = useState('Floor-to-pelvis gap');
+  const [measurementWarmedUp, setMeasurementWarmedUp] = useState(true);
+  const [measurementNotes, setMeasurementNotes] = useState('');
+  const [measurementSaving, setMeasurementSaving] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -63,6 +69,31 @@ export default function Home() {
       .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setPlan(data?.[0] ?? null); } });
     return () => { active = false; };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !supabase) { setMeasurements([]); return; }
+    let active = true;
+    supabase.from('measurements').select('id,measured_at,metric,value_cm,method,warmed_up,notes')
+      .eq('metric','middle_split_gap_cm').order('measured_at',{ascending:true}).limit(100)
+      .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setMeasurements(data ?? []); } });
+    return () => { active = false; };
+  }, [user]);
+
+  async function saveMeasurement(e) {
+    e.preventDefault(); setMeasurementSaving(true); setMessage('');
+    const value = Number(measurementValue);
+    if (!Number.isFinite(value) || value < 0 || measurementValue.trim()==='') {
+      setMessage('Enter a valid non-negative measurement in centimeters.');
+      setMeasurementSaving(false); return;
+    }
+    const {data,error} = await supabase.from('measurements').insert({
+      user_id:user.id, measured_at:new Date().toISOString(), metric:'middle_split_gap_cm',
+      value_cm:value, method:measurementMethod, warmed_up:measurementWarmedUp, notes:measurementNotes.trim()
+    }).select('id,measured_at,metric,value_cm,method,warmed_up,notes').single();
+    if (error) setMessage(error.message);
+    else { setMeasurements(current=>[...current,data].sort((a,b)=>new Date(a.measured_at)-new Date(b.measured_at))); setMeasurementValue(''); setMeasurementNotes(''); setMessage('Measurement saved!'); }
+    setMeasurementSaving(false);
+  }
 
   async function createStarterPlan() {
     setPlanSaving(true); setMessage('');
@@ -160,6 +191,30 @@ export default function Home() {
         <label>Exercise notes<textarea rows="3" placeholder="Cramping, range of motion, left/right difference…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
         <button disabled={exerciseSaving || !sessions.length} type="submit">{exerciseSaving?'Saving…':'Save exercise'}</button>
       </form></section>
+      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
+        <p>Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time. A smaller gap means you are closer to the floor.</p>
+        <form onSubmit={saveMeasurement}>
+          <label>Gap to floor (cm)<input type="number" min="0" step="0.1" required placeholder="e.g. 25.5" value={measurementValue} onChange={e=>setMeasurementValue(e.target.value)}/></label>
+          <label>Method<select value={measurementMethod} onChange={e=>setMeasurementMethod(e.target.value)}>
+            <option>Floor-to-pelvis gap</option><option>Block-supported floor-to-pelvis gap</option>
+          </select></label>
+          <label className="checkline"><input type="checkbox" checked={measurementWarmedUp} onChange={e=>setMeasurementWarmedUp(e.target.checked)}/> Measured after warming up</label>
+          <label>Notes<textarea rows="2" placeholder="Position, blocks, discomfort, setup…" value={measurementNotes} onChange={e=>setMeasurementNotes(e.target.value)}/></label>
+          <button disabled={measurementSaving} type="submit">{measurementSaving?'Saving…':'Save measurement'}</button>
+        </form>
+        {measurements.length > 0 && <div className="measure-history">
+          <h3>Progress history</h3>
+          {measurements.length > 1 && <div className="chart-scroll"><svg viewBox="0 0 320 150" role="img" aria-label="Middle splits floor gap over time" className="progress-chart">
+            {(() => {
+              const vals=measurements.map(m=>Number(m.value_cm));
+              const low=Math.min(...vals), high=Math.max(...vals), span=Math.max(1,high-low);
+              const pts=vals.map((v,i)=>[20+i*280/Math.max(1,vals.length-1),15+(v-low)/span*110]);
+              return <><line x1="20" y1="125" x2="300" y2="125" stroke="#cad8cb"/><polyline points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#426e50" strokeWidth="3" strokeLinejoin="round"/>{pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r="4" fill="#426e50"/>)}</>;
+            })()}
+          </svg></div>}
+          <div className="history">{[...measurements].reverse().slice(0,8).map(m=><article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up?'Warmed up':'Not warmed up'}{m.notes?' · '+m.notes:''}</p></article>)}</div>
+        </div>}
+      </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
       {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>Effort {s.effort ?? '—'}/10</span></div><p>{s.notes || 'Workout completed'}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}</section>
     </>}
