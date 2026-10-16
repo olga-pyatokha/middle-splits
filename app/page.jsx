@@ -2,6 +2,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
+const STARTER_PLAN = [
+  { name: 'Quadruped rock-backs', sets: 2, reps: 8, hold_seconds: null, cue: 'Move gently through a comfortable range.' },
+  { name: 'Elevated pancake good mornings', sets: 2, reps: 8, hold_seconds: null, cue: 'Keep the motion controlled; elevate hips if helpful.' },
+  { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, cue: 'Use support, stop before cramping; note left/right differences.' }
+];
 export default function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,6 +28,8 @@ export default function Home() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [selectedSession, setSelectedSession] = useState('');
   const [exerciseSaving, setExerciseSaving] = useState(false);
+  const [plan, setPlan] = useState(null);
+  const [planSaving, setPlanSaving] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -47,6 +54,34 @@ export default function Home() {
       .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setExerciseLogs(data ?? []); } });
     return () => { active = false; };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !supabase) { setPlan(null); return; }
+    let active = true;
+    supabase.from('training_plans').select('id,title,version,plan,status').eq('status','active')
+      .order('created_at',{ascending:false}).limit(1)
+      .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setPlan(data?.[0] ?? null); } });
+    return () => { active = false; };
+  }, [user]);
+
+  async function createStarterPlan() {
+    setPlanSaving(true); setMessage('');
+    const {data,error} = await supabase.from('training_plans').insert({
+      user_id:user.id,title:'Middle Splits · Starter Routine',version:1,status:'active',
+      plan:{ exercises:STARTER_PLAN, note:'Starter template, not a personalized medical or training prescription. Adjust to comfort.' }
+    }).select('id,title,version,plan,status').single();
+    if (error) setMessage(error.message);
+    else {setPlan(data);setMessage('Starter routine saved!');}
+    setPlanSaving(false);
+  }
+
+  function prepareExercise(item) {
+    setExerciseName(item.name); setSide('both'); setSets(String(item.sets));
+    setReps(item.reps == null ? '' : String(item.reps));
+    setHoldSeconds(item.hold_seconds == null ? '' : String(item.hold_seconds));
+    setExerciseNotes(item.cue || '');
+    document.getElementById('exercise-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
 
   async function saveExercise(e) {
     e.preventDefault();
@@ -99,7 +134,15 @@ export default function Home() {
       <form onSubmit={saveWorkout}><label>How did training feel? <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
       <label>Training notes<textarea rows="4" placeholder="What did you practice? Any differences between left and right?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
       <button disabled={saving} type="submit">{saving?'Saving…':'Save workout'}</button></form></section>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
+      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>Training plan</h2></div><span className="spark">✦</span></div>
+        {!plan ? <><p>Start with a gentle, editable-in-future template based on your recent exercises. This is a starting point, not a requirement to push through pain or cramping.</p>
+          <button disabled={planSaving} onClick={createStarterPlan}>{planSaving?'Saving…':'Save starter routine'}</button></> :
+          <><p>{plan.title} · Version {plan.version}</p>
+          <div className="routine">{(Array.isArray(plan.plan?.exercises)?plan.plan.exercises:[]).map((item,i)=>
+            <article className="routine-item" key={i}><div><strong>{item.name}</strong><span>{item.sets} sets × {item.reps ?? '—'} reps{item.hold_seconds ? ' · '+item.hold_seconds+'s' : ''}</span><p>{item.cue}</p></div>
+              <button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></article>)}</div></>}
+      </section>
+      <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
       <p>Save a workout above, then add exercises to it. You can also choose a previous session.</p>
       <form onSubmit={saveExercise}>
         <label>Workout session<select required value={selectedSession} onChange={e=>setSelectedSession(e.target.value)}>
