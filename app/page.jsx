@@ -26,7 +26,7 @@ export default function Home() {
   const [difficulty, setDifficulty] = useState(5);
   const [exerciseNotes, setExerciseNotes] = useState('');
   const [exerciseLogs, setExerciseLogs] = useState([]);
-  const [selectedSession, setSelectedSession] = useState('');
+  const [activeSession, setActiveSession] = useState(null);
   const [exerciseSaving, setExerciseSaving] = useState(false);
   const [plan, setPlan] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
@@ -45,10 +45,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!user || !supabase) { setSessions([]); return; }
+    if (!user || !supabase) { setSessions([]); setActiveSession(null); return; }
     let active = true;
     supabase.from('sessions').select('id,session_date,effort,notes,completed').order('session_date', { ascending: false }).limit(30)
-      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else setSessions(data ?? []); } });
+      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else { setSessions(data ?? []); setActiveSession((data ?? []).find(s=>s.completed===false) ?? null); } } });
     return () => { active = false; };
   }, [user]);
 
@@ -107,6 +107,7 @@ export default function Home() {
   }
 
   function prepareExercise(item) {
+    if (!activeSession) { setMessage('Start a session to log this exercise.'); document.getElementById('session-control')?.scrollIntoView({behavior:'smooth'}); return; }
     setExerciseName(item.name); setSide('both'); setSets(String(item.sets));
     setReps(item.reps == null ? '' : String(item.reps));
     setHoldSeconds(item.hold_seconds == null ? '' : String(item.hold_seconds));
@@ -116,9 +117,9 @@ export default function Home() {
 
   async function saveExercise(e) {
     e.preventDefault();
-    if (!selectedSession) { setMessage('Choose a workout session first.'); return; }
+    if (!activeSession) { setMessage('Start a workout session first.'); return; }
     setExerciseSaving(true); setMessage('');
-    const payload = { user_id: user.id, session_id: selectedSession, exercise_name: exerciseName.trim(),
+    const payload = { user_id: user.id, session_id: activeSession.id, exercise_name: exerciseName.trim(),
       side, sets: Number(sets), reps: reps === '' ? null : Number(reps),
       hold_seconds: holdSeconds === '' ? null : Number(holdSeconds),
       difficulty: Number(difficulty), notes: exerciseNotes.trim() };
@@ -138,15 +139,30 @@ export default function Home() {
     else if (mode === 'signup' && !data.session) setMessage('Check your email to confirm your account, then sign in.');
   }
 
-  async function saveWorkout(e) {
-    e.preventDefault(); setSaving(true); setMessage('');
+  async function startWorkout() {
+    if (activeSession || saving) return;
+    setSaving(true); setMessage('');
     const date = new Date();
     const localDate = [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
     const { data, error } = await supabase.from('sessions').insert({
-      user_id: user.id, session_date: localDate, effort: Number(effort), notes: notes.trim(), completed: true
+      user_id:user.id, session_date:localDate, plan_id:plan?.id ?? null,
+      completed:false
     }).select('id,session_date,effort,notes,completed').single();
     if (error) setMessage(error.message);
-    else { setSessions(current => [data, ...current]); setSelectedSession(data.id); setNotes(''); setEffort(5); setMessage('Workout saved!'); }
+    else { setSessions(current=>[data,...current]); setActiveSession(data); setMessage('Session started. Log your exercises below.'); }
+    setSaving(false);
+  }
+
+  async function endWorkout(e) {
+    e.preventDefault();
+    if (!activeSession || saving) return;
+    setSaving(true); setMessage('');
+    const {data,error} = await supabase.from('sessions')
+      .update({effort:Number(effort),notes:notes.trim(),completed:true})
+      .eq('id',activeSession.id).eq('completed',false)
+      .select('id,session_date,effort,notes,completed').single();
+    if (error) setMessage(error.message);
+    else { setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setMessage('Session completed!'); }
     setSaving(false);
   }
 
@@ -161,10 +177,15 @@ export default function Home() {
       <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
       <button className="link" onClick={()=>{setMode(mode==='signin'?'signup':'signin');setMessage('');}}>{mode==='signin'?'New here? Create an account':'Already registered? Sign in'}</button>
     </section> : <>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>Log a session</h2></div><span className="spark">↗</span></div>
-      <form onSubmit={saveWorkout}><label>How did training feel? <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
-      <label>Training notes<textarea rows="4" placeholder="What did you practice? Any differences between left and right?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
-      <button disabled={saving} type="submit">{saving?'Saving…':'Save workout'}</button></form></section>
+      <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
+      {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
+        <button disabled={saving} onClick={startWorkout}>{saving?'Starting…':'Start session'}</button></> :
+        <><p className="active-indicator">● Active workout · {activeSession.session_date}</p>
+        <p>Log your exercises below. When you finish, add a session summary and end your workout.</p>
+        <form onSubmit={endWorkout}><label>Overall effort <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
+        <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+        <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
+      </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>Training plan</h2></div><span className="spark">✦</span></div>
         {!plan ? <><p>Start with a gentle, editable-in-future template based on your recent exercises. This is a starting point, not a requirement to push through pain or cramping.</p>
           <button disabled={planSaving} onClick={createStarterPlan}>{planSaving?'Saving…':'Save starter routine'}</button></> :
@@ -174,11 +195,9 @@ export default function Home() {
               <button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></article>)}</div></>}
       </section>
       <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
-      <p>Save a workout above, then add exercises to it. You can also choose a previous session.</p>
+      <p>{activeSession ? 'Exercises automatically save to your active session.' : 'Start a session above to log exercises.'}</p>
       <form onSubmit={saveExercise}>
-        <label>Workout session<select required value={selectedSession} onChange={e=>setSelectedSession(e.target.value)}>
-          <option value="">Choose a session</option>{sessions.map(s=><option key={s.id} value={s.id}>{s.session_date} · {s.notes?.slice(0,35) || 'Workout'}</option>)}
-        </select></label>
+
         <label>Exercise<select value={exerciseName} onChange={e=>setExerciseName(e.target.value)}>
           {['Seated straddle compression lifts','Elevated pancake good mornings','Quadruped rock-backs','Middle split hold','Frog stretch','Other'].map(name=><option key={name} value={name}>{name}</option>)}
         </select></label>
@@ -189,7 +208,7 @@ export default function Home() {
         <label>Hold (seconds)<input type="number" min="0" step="0.5" value={holdSeconds} onChange={e=>setHoldSeconds(e.target.value)}/></label></div>
         <label>Difficulty <strong>{difficulty}/10</strong><input type="range" min="1" max="10" value={difficulty} onChange={e=>setDifficulty(e.target.value)}/></label>
         <label>Exercise notes<textarea rows="3" placeholder="Cramping, range of motion, left/right difference…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
-        <button disabled={exerciseSaving || !sessions.length} type="submit">{exerciseSaving?'Saving…':'Save exercise'}</button>
+        <button disabled={exerciseSaving || !activeSession} type="submit">{exerciseSaving?'Saving…':'Save exercise'}</button>
       </form></section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
         <p>Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time. A smaller gap means you are closer to the floor.</p>
@@ -216,7 +235,7 @@ export default function Home() {
         </div>}
       </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
-      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>Effort {s.effort ?? '—'}/10</span></div><p>{s.notes || 'Workout completed'}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}</section>
+      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}</section>
     </>}
     {message && <p role="status" className="status">{message}</p>}
     <footer>Built for the long game 🌿</footer>
