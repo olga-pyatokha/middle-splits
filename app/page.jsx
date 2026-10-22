@@ -227,7 +227,7 @@ export default function Home() {
             {(() => {
               const vals=measurements.map(m=>Number(m.value_cm));
               const low=Math.min(...vals), high=Math.max(...vals), span=Math.max(1,high-low);
-              const pts=vals.map((v,i)=>[20+i*280/Math.max(1,vals.length-1),15+(v-low)/span*110]);
+              const pts=vals.map((v,i)=>[20+i*280/Math.max(1,vals.length-1),15+(high-v)/span*110]);
               return <><line x1="20" y1="125" x2="300" y2="125" stroke="#cad8cb"/><polyline points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#426e50" strokeWidth="3" strokeLinejoin="round"/>{pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r="4" fill="#426e50"/>)}</>;
             })()}
           </svg></div>}
