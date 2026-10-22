@@ -12,6 +12,16 @@ const EXERCISES = [
   { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, minutes: 3, focus: 'strength', cue: 'Use support, stop before cramping; note left/right differences.' },
   { name: 'Wide-stance lateral weight shifts', sets: 2, reps: 6, hold_seconds: null, minutes: 4, focus: 'strength', cue: 'Move slowly and keep the range comfortable.' }
 ];
+const EXERCISE_MEDIA = {
+  'Quadruped rock-backs': { url: 'https://theprehabguys.com/vimeo-video/quadruped-rock-back/', label: 'Watch demonstration' },
+  'Adductor rock-backs': { url: 'https://theprehabguys.com/vimeo-video/quadruped-dynamic-long-adductor-stretch/', label: 'Watch demonstration' },
+  'Seated straddle compression lifts': { url: 'https://www.youtube.com/watch?v=7MNNGqec0Dc', label: 'Watch on YouTube', youtubeId: '7MNNGqec0Dc' },
+  'Supported middle split hold': { url: 'https://www.youtube.com/results?search_query=supported+middle+split+hold+blocks', label: 'Find video examples' },
+  'Frog stretch': { url: 'https://www.youtube.com/results?search_query=frog+stretch+proper+form', label: 'Find video examples' },
+  'Elevated pancake good mornings': { url: 'https://www.youtube.com/results?search_query=elevated+pancake+good+mornings+exercise', label: 'Find video examples' },
+  'Seated pancake hold': { url: 'https://www.youtube.com/results?search_query=seated+pancake+stretch+form', label: 'Find video examples' },
+  'Wide-stance lateral weight shifts': { url: 'https://www.youtube.com/results?search_query=wide+stance+lateral+weight+shifts+mobility', label: 'Find video examples' }
+};
 const STARTER_PLAN = EXERCISES.slice(0, 3);
 const WEEK_FOCUS = ['recovery', 'middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
 const WEEK_LABELS = ['Sun · Recovery', 'Mon · Middle splits', 'Tue · Pancake', 'Wed · Recovery', 'Thu · Middle splits', 'Fri · Pancake', 'Sat · Mixed'];
@@ -61,6 +71,9 @@ export default function Home() {
   const [plan, setPlan] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
   const [workoutMinutes, setWorkoutMinutes] = useState('15');
+  const [guidedExercise, setGuidedExercise] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
   const [measurements, setMeasurements] = useState([]);
   const [measurementValue, setMeasurementValue] = useState('');
   const [measurementMethod, setMeasurementMethod] = useState('Floor-to-pelvis gap');
@@ -145,6 +158,20 @@ export default function Home() {
     setExerciseNotes(item.cue || '');
     document.getElementById('exercise-form')?.scrollIntoView({behavior:'smooth',block:'start'});
   }
+
+  function openGuide(item) {
+    setGuidedExercise(item);
+    setSecondsLeft(item.minutes * 60);
+    setTimerRunning(false);
+  }
+  useEffect(() => {
+    if (!timerRunning || secondsLeft <= 0) return;
+    const timer = setInterval(() => setSecondsLeft(value => Math.max(0, value - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [timerRunning, secondsLeft]);
+  useEffect(() => {
+    if (secondsLeft === 0) setTimerRunning(false);
+  }, [secondsLeft]);
 
   async function saveExercise(e) {
     e.preventDefault();
@@ -231,7 +258,20 @@ export default function Home() {
         <div className="routine">{suggestedWorkout.exercises.map(item=>
           <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
-            <button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></article>)}</div>
+            <div className="routine-actions"><button className="routine-button" onClick={()=>openGuide(item)}>Guide / timer</button><button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></div></article>)}</div>
+        {guidedExercise && <div className="guide-panel">
+          <div className="sectionhead"><h3>{guidedExercise.name}</h3><button className="quiet" onClick={()=>{setGuidedExercise(null);setTimerRunning(false);}}>Close</button></div>
+          <p>{guidedExercise.cue}</p>
+          <p>{guidedExercise.sets} sets {guidedExercise.reps != null ? '× '+guidedExercise.reps+' controlled reps' : '× '+guidedExercise.hold_seconds+' seconds'} · Suggested block: {guidedExercise.minutes} min (including setup and rest)</p>
+          {EXERCISE_MEDIA[guidedExercise.name] && <div className="exercise-media">
+            {EXERCISE_MEDIA[guidedExercise.name].youtubeId && <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer"><img loading="lazy" alt={'Video preview for '+guidedExercise.name} src={'https://img.youtube.com/vi/'+EXERCISE_MEDIA[guidedExercise.name].youtubeId+'/hqdefault.jpg'} /></a>}
+            <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer">{EXERCISE_MEDIA[guidedExercise.name].label} ↗</a>
+          </div>}
+          <div className="timer-display" role="timer">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
+          <div className="timer-actions"><button onClick={()=>setTimerRunning(v=>!v)} disabled={secondsLeft===0}>{timerRunning?'Pause':'Start / resume'}</button><button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.minutes*60);}}>Reset</button>{guidedExercise.hold_seconds && <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.hold_seconds);}}>Hold timer</button>}</div>
+          <p className="routine-note">The timer guides your pace; you can pause for setup or rest. For reps, move slowly rather than rushing to fill the time. Stop for pain or cramping.</p>
+          <button className="routine-button" onClick={()=>prepareExercise(guidedExercise)}>Log this exercise</button>
+        </div>}
         <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
       </section>
       <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
