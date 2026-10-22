@@ -13,8 +13,8 @@ const EXERCISES = [
   { name: 'Wide-stance lateral weight shifts', sets: 2, reps: 6, hold_seconds: null, minutes: 4, focus: 'strength', cue: 'Move slowly and keep the range comfortable.' }
 ];
 const EXERCISE_MEDIA = {
-  'Quadruped rock-backs': { url: 'https://theprehabguys.com/vimeo-video/quadruped-rock-back/', label: 'Watch demonstration' },
-  'Adductor rock-backs': { url: 'https://theprehabguys.com/vimeo-video/quadruped-dynamic-long-adductor-stretch/', label: 'Watch demonstration' },
+  'Quadruped rock-backs': { url: 'https://www.youtube.com/watch?v=ub7AzL_5IKo', label: 'Watch free YouTube demonstration', youtubeId: 'ub7AzL_5IKo' },
+  'Adductor rock-backs': { url: 'https://www.youtube.com/results?search_query=adductor+rock+back+exercise+physical+therapy', label: 'Find free YouTube demonstrations' },
   'Seated straddle compression lifts': { url: 'https://www.youtube.com/watch?v=7MNNGqec0Dc', label: 'Watch on YouTube', youtubeId: '7MNNGqec0Dc' },
   'Supported middle split hold': { url: 'https://www.youtube.com/results?search_query=supported+middle+split+hold+blocks', label: 'Find video examples' },
   'Frog stretch': { url: 'https://www.youtube.com/results?search_query=frog+stretch+proper+form', label: 'Find video examples' },
