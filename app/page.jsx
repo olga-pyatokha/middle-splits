@@ -22,6 +22,12 @@ const EXERCISE_MEDIA = {
   'Seated pancake hold': { url: 'https://www.youtube.com/results?search_query=seated+pancake+stretch+form', label: 'Find video examples' },
   'Wide-stance lateral weight shifts': { url: 'https://www.youtube.com/results?search_query=wide+stance+lateral+weight+shifts+mobility', label: 'Find video examples' }
 };
+function exerciseSearchUrl(name, platform) {
+  const query = encodeURIComponent(name + ' exercise demonstration');
+  return platform === 'instagram'
+    ? 'https://www.instagram.com/explore/search/keyword/?q=' + query
+    : 'https://www.youtube.com/results?search_query=' + query;
+}
 const STARTER_PLAN = EXERCISES.slice(0, 3);
 const WEEK_FOCUS = ['recovery', 'middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
 const WEEK_LABELS = ['Sun · Recovery', 'Mon · Middle splits', 'Tue · Pancake', 'Wed · Recovery', 'Thu · Middle splits', 'Fri · Pancake', 'Sat · Mixed'];
@@ -267,6 +273,10 @@ export default function Home() {
             {EXERCISE_MEDIA[guidedExercise.name].youtubeId && <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer"><img loading="lazy" alt={'Video preview for '+guidedExercise.name} src={'https://img.youtube.com/vi/'+EXERCISE_MEDIA[guidedExercise.name].youtubeId+'/hqdefault.jpg'} /></a>}
             <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer">{EXERCISE_MEDIA[guidedExercise.name].label} ↗</a>
           </div>}
+          <div className="exercise-links">
+            <a href={exerciseSearchUrl(guidedExercise.name, 'youtube')} target="_blank" rel="noopener noreferrer">Search YouTube ↗</a>
+            <a href={exerciseSearchUrl(guidedExercise.name, 'instagram')} target="_blank" rel="noopener noreferrer">Search Instagram ↗</a>
+          </div>
           <div className="timer-display" role="timer">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
           <div className="timer-actions"><button onClick={()=>setTimerRunning(v=>!v)} disabled={secondsLeft===0}>{timerRunning?'Pause':'Start / resume'}</button><button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.minutes*60);}}>Reset</button>{guidedExercise.hold_seconds && <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.hold_seconds);}}>Hold timer</button>}</div>
           <p className="routine-note">The timer guides your pace; you can pause for setup or rest. For reps, move slowly rather than rushing to fill the time. Stop for pain or cramping.</p>
