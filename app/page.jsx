@@ -2,11 +2,41 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-const STARTER_PLAN = [
-  { name: 'Quadruped rock-backs', sets: 2, reps: 8, hold_seconds: null, cue: 'Move gently through a comfortable range.' },
-  { name: 'Elevated pancake good mornings', sets: 2, reps: 8, hold_seconds: null, cue: 'Keep the motion controlled; elevate hips if helpful.' },
-  { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, cue: 'Use support, stop before cramping; note left/right differences.' }
+const EXERCISES = [
+  { name: 'Quadruped rock-backs', sets: 2, reps: 8, hold_seconds: null, minutes: 2, focus: 'mobility', cue: 'Move gently through a comfortable range.' },
+  { name: 'Adductor rock-backs', sets: 2, reps: 8, hold_seconds: null, minutes: 3, focus: 'middle', cue: 'Extend one leg to the side; rock back without forcing range.' },
+  { name: 'Frog stretch', sets: 2, reps: null, hold_seconds: 30, minutes: 3, focus: 'middle', cue: 'Support your weight and stay in a comfortable stretch.' },
+  { name: 'Supported middle split hold', sets: 2, reps: null, hold_seconds: 20, minutes: 4, focus: 'middle', cue: 'Use blocks or hands for support; maintain control.' },
+  { name: 'Elevated pancake good mornings', sets: 2, reps: 8, hold_seconds: null, minutes: 4, focus: 'pancake', cue: 'Hinge from the hips; sit on a block if helpful.' },
+  { name: 'Seated pancake hold', sets: 2, reps: null, hold_seconds: 30, minutes: 3, focus: 'pancake', cue: 'Keep a comfortable forward hinge rather than rounding to reach farther.' },
+  { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, minutes: 3, focus: 'strength', cue: 'Use support, stop before cramping; note left/right differences.' },
+  { name: 'Wide-stance lateral weight shifts', sets: 2, reps: 6, hold_seconds: null, minutes: 4, focus: 'strength', cue: 'Move slowly and keep the range comfortable.' }
 ];
+const STARTER_PLAN = EXERCISES.slice(0, 3);
+const WEEK_FOCUS = ['recovery', 'middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
+const WEEK_LABELS = ['Sun · Recovery', 'Mon · Middle splits', 'Tue · Pancake', 'Wed · Recovery', 'Thu · Middle splits', 'Fri · Pancake', 'Sat · Mixed'];
+function buildWorkout(minutes, sessions, logs) {
+  const today = new Date();
+  const todayKey = [today.getFullYear(), String(today.getMonth()+1).padStart(2,'0'), String(today.getDate()).padStart(2,'0')].join('-');
+  const day = today.getDay();
+  const recentSessions = sessions.filter(s => s.completed && s.session_date < todayKey && (new Date(todayKey+'T12:00:00')-new Date(s.session_date+'T12:00:00'))/86400000 <= 2);
+  const recentNames = new Set(logs.filter(l => recentSessions.some(s => s.id === l.session_id)).map(l => l.exercise_name));
+  const focus = WEEK_FOCUS[day];
+  const order = focus === 'recovery' ? ['mobility','pancake'] :
+    focus === 'middle' ? ['mobility','middle','strength','pancake'] :
+    focus === 'pancake' ? ['mobility','pancake','strength','middle'] :
+    ['mobility','middle','pancake','strength'];
+  const candidates = EXERCISES.filter(e => focus !== 'recovery' || e.focus === 'mobility' || e.name === 'Seated pancake hold')
+    .sort((a,b) => order.indexOf(a.focus)-order.indexOf(b.focus) || Number(recentNames.has(a.name))-Number(recentNames.has(b.name)));
+  // Avoid repeating recent demanding exercises when alternatives in the same category exist.
+  const selected = [], used = new Set();
+  let remaining = Number(minutes);
+  for (const e of candidates) {
+    if (used.has(e.name) || e.minutes > remaining) continue;
+    selected.push(e); used.add(e.name); remaining -= e.minutes;
+  }
+  return { label: WEEK_LABELS[day], exercises: selected, estimated: Number(minutes)-remaining };
+}
 export default function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,6 +60,7 @@ export default function Home() {
   const [exerciseSaving, setExerciseSaving] = useState(false);
   const [plan, setPlan] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
+  const [workoutMinutes, setWorkoutMinutes] = useState('15');
   const [measurements, setMeasurements] = useState([]);
   const [measurementValue, setMeasurementValue] = useState('');
   const [measurementMethod, setMeasurementMethod] = useState('Floor-to-pelvis gap');
@@ -166,6 +197,8 @@ export default function Home() {
     setSaving(false);
   }
 
+  const suggestedWorkout = buildWorkout(workoutMinutes, sessions, exerciseLogs);
+
   if (!supabase) return <main className="shell"><h1>Middle Splits</h1><p>Set your Supabase environment variables to connect the app.</p></main>;
   if (loading) return <main className="shell"><p>Loading…</p></main>;
 
@@ -186,20 +219,27 @@ export default function Home() {
         <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
         <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
       </section>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>Training plan</h2></div><span className="spark">✦</span></div>
-        {!plan ? <><p>Start with a gentle, editable-in-future template based on your recent exercises. This is a starting point, not a requirement to push through pain or cramping.</p>
-          <button disabled={planSaving} onClick={createStarterPlan}>{planSaving?'Saving…':'Save starter routine'}</button></> :
-          <><p>{plan.title} · Version {plan.version}</p>
-          <div className="routine">{(Array.isArray(plan.plan?.exercises)?plan.plan.exercises:[]).map((item,i)=>
-            <article className="routine-item" key={i}><div><strong>{item.name}</strong><span>{item.sets} sets × {item.reps ?? '—'} reps{item.hold_seconds ? ' · '+item.hold_seconds+'s' : ''}</span><p>{item.cue}</p></div>
-              <button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></article>)}</div></>}
+      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>This week's training</h2></div><span className="spark">✦</span></div>
+        <p>Middle splits and pancake, with lighter recovery days. Today's exercises take recent completed sessions into account.</p>
+        <div className="week-overview">{WEEK_LABELS.map((label,i)=><span key={label} className={i===new Date().getDay()?'week-day current':'week-day'}>{label}</span>)}</div>
+        <label>Time available
+          <select value={workoutMinutes} onChange={e=>setWorkoutMinutes(e.target.value)}>
+            <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
+          </select>
+        </label>
+        <h3>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</h3>
+        <div className="routine">{suggestedWorkout.exercises.map(item=>
+          <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
+            <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
+            <button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></article>)}</div>
+        <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
       </section>
       <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
       <p>{activeSession ? 'Exercises automatically save to your active session.' : 'Start a session above to log exercises.'}</p>
       <form onSubmit={saveExercise}>
 
         <label>Exercise<select value={exerciseName} onChange={e=>setExerciseName(e.target.value)}>
-          {['Seated straddle compression lifts','Elevated pancake good mornings','Quadruped rock-backs','Middle split hold','Frog stretch','Other'].map(name=><option key={name} value={name}>{name}</option>)}
+          {[...EXERCISES.map(e=>e.name),'Other'].map(name=><option key={name} value={name}>{name}</option>)}
         </select></label>
         {exerciseName==='Other' && <p>Use the notes field to specify the exercise.</p>}
         <label>Side<select value={side} onChange={e=>setSide(e.target.value)}><option value="both">Both / center</option><option value="left">Left</option><option value="right">Right</option></select></label>
