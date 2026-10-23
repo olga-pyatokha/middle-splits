@@ -80,6 +80,9 @@ export default function Home() {
   const [guidedExercise, setGuidedExercise] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
+  const [timerDuration, setTimerDuration] = useState(30);
+  const [completedReps, setCompletedReps] = useState(0);
+  const [completedSets, setCompletedSets] = useState(0);
   const [measurements, setMeasurements] = useState([]);
   const [measurementValue, setMeasurementValue] = useState('');
   const [measurementMethod, setMeasurementMethod] = useState('Floor-to-pelvis gap');
@@ -166,9 +169,25 @@ export default function Home() {
   }
 
   function openGuide(item) {
+    if (guidedExercise?.name === item.name) { setGuidedExercise(null); setTimerRunning(false); return; }
     setGuidedExercise(item);
-    setSecondsLeft(item.minutes * 60);
+    setCompletedReps(0);
+    setCompletedSets(0);
+    const duration = item.hold_seconds || (item.reps ? 5 : 30);
+    setTimerDuration(duration);
+    setSecondsLeft(duration);
     setTimerRunning(false);
+  }
+  function setGuideDuration(value) {
+    const duration = Math.max(1, Math.min(600, Number(value) || 1));
+    setTimerDuration(duration); setSecondsLeft(duration); setTimerRunning(false);
+  }
+  function recordRep() {
+    if (!guidedExercise) return;
+    const target = guidedExercise.reps || 1;
+    if (completedReps + 1 >= target) { setCompletedReps(0); setCompletedSets(v => Math.min(guidedExercise.sets, v + 1)); }
+    else setCompletedReps(v => v + 1);
+    setTimerRunning(false); setSecondsLeft(timerDuration);
   }
   useEffect(() => {
     if (!timerRunning || secondsLeft <= 0) return;
@@ -301,24 +320,35 @@ export default function Home() {
         <div className="routine">{suggestedWorkout.exercises.map(item=>
           <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
-            <div className="routine-actions"><button className="routine-button" onClick={()=>openGuide(item)}>Guide / timer</button><button className="routine-button" onClick={()=>prepareExercise(item)}>Log this</button></div></article>)}</div>
-        {guidedExercise && <div className="guide-panel">
-          <div className="sectionhead"><h3>{guidedExercise.name}</h3><button className="quiet" onClick={()=>{setGuidedExercise(null);setTimerRunning(false);}}>Close</button></div>
-          <p>{guidedExercise.cue}</p>
-          <p>{guidedExercise.sets} sets {guidedExercise.reps != null ? '× '+guidedExercise.reps+' controlled reps' : '× '+guidedExercise.hold_seconds+' seconds'} · Suggested block: {guidedExercise.minutes} min (including setup and rest)</p>
-          {EXERCISE_MEDIA[guidedExercise.name] && <div className="exercise-media">
-            {EXERCISE_MEDIA[guidedExercise.name].youtubeId && <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer"><img loading="lazy" alt={'Video preview for '+guidedExercise.name} src={'https://img.youtube.com/vi/'+EXERCISE_MEDIA[guidedExercise.name].youtubeId+'/hqdefault.jpg'} /></a>}
-            <a href={EXERCISE_MEDIA[guidedExercise.name].url} target="_blank" rel="noopener noreferrer">{EXERCISE_MEDIA[guidedExercise.name].label} ↗</a>
+            <div className="routine-actions"><button className="routine-button" aria-expanded={guidedExercise?.name===item.name} onClick={()=>openGuide(item)}>{guidedExercise?.name===item.name?'Close exercise ↑':'Open exercise ↓'}</button></div>
+          {guidedExercise?.name===item.name && <div className="guide-panel">
+            <p>{item.cue}</p>
+            <p><strong>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s holds'}</strong> · ~{item.minutes} min including rest</p>
+            {EXERCISE_MEDIA[item.name] && <div className="exercise-media">
+              {EXERCISE_MEDIA[item.name].youtubeId && <a href={EXERCISE_MEDIA[item.name].url} target="_blank" rel="noopener noreferrer"><img loading="lazy" alt={'Video preview for '+item.name} src={'https://img.youtube.com/vi/'+EXERCISE_MEDIA[item.name].youtubeId+'/hqdefault.jpg'}/></a>}
+              <a href={EXERCISE_MEDIA[item.name].url} target="_blank" rel="noopener noreferrer">{EXERCISE_MEDIA[item.name].label} ↗</a>
+            </div>}
+            <div className="exercise-links">
+              <a href={exerciseSearchUrl(item.name,'youtube')} target="_blank" rel="noopener noreferrer">YouTube demos ↗</a>
+              <a href={exerciseSearchUrl(item.name,'instagram')} target="_blank" rel="noopener noreferrer">Instagram demos ↗</a>
+            </div>
+            <label>Timer per {item.reps != null ? 'rep' : 'hold'} (seconds)
+              <input type="number" min="1" max="600" value={timerDuration} onChange={e=>setGuideDuration(e.target.value)}/>
+            </label>
+            <div className="timer-display" role="timer" aria-live="off">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
+            <div className="timer-actions">
+              <button onClick={()=>{if(secondsLeft===0)setSecondsLeft(timerDuration);setTimerRunning(v=>!v)}}>{timerRunning?'Pause':'Start timer'}</button>
+              <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(timerDuration)}}>Reset timer</button>
+            </div>
+            <div className="rep-progress"><strong>{completedSets} / {item.sets} sets complete</strong><span>{item.reps != null ? completedReps+' / '+item.reps+' reps in current set' : 'Tap after each hold'}</span></div>
+            <div className="timer-actions">
+              <button onClick={recordRep} disabled={completedSets>=item.sets}>✓ {item.reps != null?'Log rep':'Log hold'}</button>
+              <button className="routine-button" onClick={()=>{setCompletedReps(0);setCompletedSets(0);setTimerRunning(false);setSecondsLeft(timerDuration)}}>Restart count</button>
+            </div>
+            <p className="routine-note">Use the timer to pace each rep or hold. Stop if you feel pain or cramping. Rep counts here are temporary until you save the exercise.</p>
+            <button onClick={()=>{prepareExercise(item);setSets(String(completedSets || item.sets));setReps(item.reps==null?'':String(item.reps));}}>Save exercise details ↓</button>
           </div>}
-          <div className="exercise-links">
-            <a href={exerciseSearchUrl(guidedExercise.name, 'youtube')} target="_blank" rel="noopener noreferrer">Search YouTube ↗</a>
-            <a href={exerciseSearchUrl(guidedExercise.name, 'instagram')} target="_blank" rel="noopener noreferrer">Search Instagram ↗</a>
-          </div>
-          <div className="timer-display" role="timer">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
-          <div className="timer-actions"><button onClick={()=>setTimerRunning(v=>!v)} disabled={secondsLeft===0}>{timerRunning?'Pause':'Start / resume'}</button><button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.minutes*60);}}>Reset</button>{guidedExercise.hold_seconds && <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(guidedExercise.hold_seconds);}}>Hold timer</button>}</div>
-          <p className="routine-note">The timer guides your pace; you can pause for setup or rest. For reps, move slowly rather than rushing to fill the time. Stop for pain or cramping.</p>
-          <button className="routine-button" onClick={()=>prepareExercise(guidedExercise)}>Log this exercise</button>
-        </div>}
+          </article>)}</div>
         <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
       </section>
       <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
