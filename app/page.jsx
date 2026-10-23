@@ -230,6 +230,43 @@ export default function Home() {
     setSaving(false);
   }
 
+  const [exporting, setExporting] = useState(false);
+  async function exportTrainingHistory() {
+    if (!user || !supabase || exporting) return;
+    setExporting(true); setMessage('');
+    try {
+      const tables = ['sessions', 'exercise_logs', 'measurements', 'training_plans', 'coach_reviews'];
+      const history = {};
+      for (const table of tables) {
+        const rows = [];
+        for (let offset = 0; ; offset += 500) {
+          const { data, error } = await supabase.from(table).select('*')
+            .eq('user_id', user.id).range(offset, offset + 499);
+          if (error) throw new Error(table + ': ' + error.message);
+          rows.push(...(data || []));
+          if (!data || data.length < 500) break;
+        }
+        history[table] = rows;
+      }
+      const payload = { format: 'middle-splits-training-export', version: 1,
+        exported_at: new Date().toISOString(), history };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'middle-splits-training-' + new Date().toISOString().slice(0,10) + '.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage('Training history exported. You can upload the JSON file to ChatGPT for a session review.');
+    } catch (error) {
+      setMessage('Export failed: ' + error.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const suggestedWorkout = buildWorkout(workoutMinutes, sessions, exerciseLogs);
 
   if (!supabase) return <main className="shell"><h1>Middle Splits</h1><p>Set your Supabase environment variables to connect the app.</p></main>;
@@ -325,7 +362,15 @@ export default function Home() {
         </div>}
       </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
-      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}</section>
+      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}
+      <div className="export-history">
+        <h3>Share your training history</h3>
+        <p>Download your sessions, exercise feedback, measurements and plans as a JSON file to upload to ChatGPT. Your data stays private until you choose to share the file.</p>
+        <button type="button" disabled={exporting} onClick={exportTrainingHistory}>
+          {exporting ? 'Preparing export…' : '↓ Export training history'}
+        </button>
+      </div>
+      </section>
     </>}
     {message && <p role="status" className="status">{message}</p>}
     <footer>Built for the long game 🌿</footer>
