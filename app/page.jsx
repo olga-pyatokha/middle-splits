@@ -310,7 +310,7 @@ export default function Home() {
     if(!user || !supabase || !preferencesLoaded)return;
     const column={days:'goal_days',minutes:'goal_minutes',carry:'carry_exercises'}[k];
     if(!column)return;
-    const {error}=await supabase.from('user_preferences').upsert({user_id:user.id,[column]:v,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+    const {error}=await supabase.from('user_preferences').update({[column]:v,updated_at:new Date().toISOString()}).eq('user_id',user.id);
     if(error)setMessage('Could not save preferences: '+error.message);
   }
   function toggleCarry(name){const next=carry.includes(name)?carry.filter(n=>n!==name):[...carry,name];setCarry(next);persist('carry',next)}
