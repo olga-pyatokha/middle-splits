@@ -112,3 +112,5 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 /* Three primary destinations: Home, Workout, Progress */
 .app-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+.exercise-picture{display:block;width:100%;max-width:240px;height:auto;aspect-ratio:18/11;border-radius:12px;margin:0 0 10px;flex-shrink:0}
