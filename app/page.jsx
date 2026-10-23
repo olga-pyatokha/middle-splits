@@ -148,7 +148,7 @@ export default function Home() {
       value_cm:value, method:measurementMethod, warmed_up:measurementWarmedUp, notes:measurementNotes.trim()
     }).select('id,measured_at,metric,value_cm,method,warmed_up,notes').single();
     if (error) setMessage(error.message);
-    else { setMeasurements(current=>[...current,data].sort((a,b)=>new Date(a.measured_at)-new Date(b.measured_at))); setMeasurementValue(''); setMeasurementNotes(''); setMessage('Measurement saved!'); }
+    else { setMeasurements(current=>[...current,data].sort((a,b)=>new Date(a.measured_at)-new Date(b.measured_at))); setMeasurementValue(''); setMeasurementNotes(''); setMessage('Measurement saved!'); if(sessionStage==='measurement'){setSessionStage('exercises');setScreen('home');} }
     setMeasurementSaving(false);
   }
 
@@ -165,7 +165,7 @@ export default function Home() {
 
   function prepareExercise(item) {
     if (!activeSession) { setMessage('Start a session to log this exercise.'); document.getElementById('session-control')?.scrollIntoView({behavior:'smooth'}); return; }
-    setExerciseName(item.name); setSide('both'); setSets('1'); setSetTarget(item.sets);
+    setScreen('session');setSessionStage('exercises');setExerciseName(item.name); setSide('both'); setSets('1'); setSetTarget(item.sets);
     const savedCount = exerciseLogs.filter(l=>l.session_id===activeSession.id && l.exercise_name===item.name && l.notes?.startsWith('[Set ')).length;
     setSetIndex(savedCount+1); setLoggedSetCounts(v=>({...v,[item.name]:savedCount})); setSetFeedback('');
     setReps(item.reps == null ? '' : String(item.reps));
@@ -244,7 +244,7 @@ export default function Home() {
       completed:false
     }).select('id,session_date,effort,notes,completed').single();
     if (error) setMessage(error.message);
-    else { const next={...timings,[data.id]:{started:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>[data,...current]); setActiveSession(data); setMessage('Session started. Log your exercises below.'); }
+    else { const next={...timings,[data.id]:{started:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>[data,...current]); setActiveSession(data); setScreen('session');setSessionStage('exercises'); setMessage('Session started. Log your exercises below.'); }
     setSaving(false);
   }
 
@@ -257,11 +257,13 @@ export default function Home() {
       .eq('id',activeSession.id).eq('completed',false)
       .select('id,session_date,effort,notes,completed').single();
     if (error) setMessage(error.message);
-    else { const next={...timings,[data.id]:{...timings[data.id],ended:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setMessage('Session completed!'); }
+    else { const next={...timings,[data.id]:{...timings[data.id],ended:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setSessionStage('measurement');setScreen('session');setMessage('Session completed. Add a measurement if you want, or finish.'); }
     setSaving(false);
   }
 
   const [exporting, setExporting] = useState(false);
+  const [screen, setScreen] = useState('home');
+  const [sessionStage, setSessionStage] = useState('exercises');
   const [openDay, setOpenDay] = useState(null);
   const [openHistory, setOpenHistory] = useState(null);
   const [carry, setCarry] = useState([]);
@@ -340,16 +342,24 @@ export default function Home() {
       <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
       <button className="link" onClick={()=>{setMode(mode==='signin'?'signup':'signin');setMessage('');}}>{mode==='signin'?'New here? Create an account':'Already registered? Sign in'}</button>
     </section> : <>
-      <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
+      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Overview</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Session</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>▤ History</button></nav>
+      {screen==='home' && <section className="panel dashboard-panel">
+        <span className="eyebrow">YOUR PROGRESS</span><h2>Training overview</h2>
+        <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length?Number(measurements[measurements.length-1].value_cm)+' cm':'—'}</strong><span>Latest split gap</span></div></div>
+        <h3>Next session</h3><p>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</p>
+        <div className="next-preview">{workoutItems.length?workoutItems.map(item=><span key={item.name}>{item.name}</span>):<span>No exercises planned</span>}</div>
+        <button onClick={()=>{setScreen('session');setSessionStage('exercises')}}>{activeSession?'Continue session →':'View session →'}</button>
+      </section>}
+      {screen==='session' && <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
       {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
         <button disabled={saving} onClick={startWorkout}>{saving?'Starting…':'Start session'}</button></> :
         <><p className="active-indicator">● Active workout · {activeSession.session_date}</p>
         <p>Active time: {elapsed(activeSession)===null?'Not tracked on this device':elapsed(activeSession)+' min'}. Log exercises below, then finish your session.</p>
-        <form onSubmit={endWorkout}><label>Overall effort <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
+        <button className="quiet" onClick={()=>setSessionStage('measurement')}>Measure now (optional) →</button><form onSubmit={endWorkout}><label>Overall effort <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
         <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
         <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
-      </section>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>This week's training</h2></div><span className="spark">✦</span></div>
+      </section>}
+      {screen==='session' && sessionStage==='exercises' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>This week's training</h2></div><span className="spark">✦</span></div>
         <p>Middle splits and pancake, with lighter recovery days. Today's exercises take recent completed sessions into account.</p>
         <div className="week-overview">{WEEK_LABELS.map((label,i)=>{
           const day=new Date(monday);day.setDate(day.getDate()+((i+6)%7));
@@ -363,7 +373,7 @@ export default function Home() {
             <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
           </select>
         </label>
-        <h3>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</h3>
+        <h3>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</h3><p className="routine-note">Open an exercise to see guidance and timing. Log sets after starting the session.</p>
         <div className="routine">{workoutItems.map(item=>
           <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
@@ -397,8 +407,8 @@ export default function Home() {
           </div>}
           </article>)}</div>
         <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
-      </section>
-      <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
+      </section>}
+      {screen==='session' && sessionStage==='exercises' && activeSession && <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
       <p>{activeSession ? 'Exercises automatically save to your active session.' : 'Start a session above to log exercises.'}</p>
       <form onSubmit={saveExercise}>
 
@@ -416,9 +426,10 @@ export default function Home() {
         <label>Additional exercise notes<textarea rows="2" placeholder="Optional notes…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
         <button disabled={exerciseSaving || !activeSession} type="submit">{exerciseSaving?'Saving…':'✓ Save set '+setIndex}</button>
         <p className="routine-note">Each tap saves one set separately, with its own reps, hold duration, difficulty and feedback. You can adjust the next set before saving.</p>
-      </form></section>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
-        <p>Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time. A smaller gap means you are closer to the floor.</p>
+      </form></section>}
+      {screen==='session' && sessionStage==='measurement' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
+        <p>Optional end-of-session measurement. Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time.</p>
+        <button className="quiet" onClick={()=>{setSessionStage('exercises');setScreen('home')}}>Skip measurement · Back to overview →</button>
         <form onSubmit={saveMeasurement}>
           <label>Gap to floor (cm)<input type="number" min="0" step="0.1" required placeholder="e.g. 25.5" value={measurementValue} onChange={e=>setMeasurementValue(e.target.value)}/></label>
           <label>Method<select value={measurementMethod} onChange={e=>setMeasurementMethod(e.target.value)}>
@@ -440,8 +451,8 @@ export default function Home() {
           </svg></div>}
           <div className="history">{[...measurements].reverse().slice(0,8).map(m=><article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up?'Warmed up':'Not warmed up'}{m.notes?' · '+m.notes:''}</p></article>)}</div>
         </div>}
-      </section>
-      <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
+      </section>}
+      {screen==='history' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
       {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
       <div className="export-history">
         <h3>Share your training history</h3>
@@ -450,7 +461,7 @@ export default function Home() {
           {exporting ? 'Preparing export…' : '↓ Export training history'}
         </button>
       </div>
-      </section>
+      </section>}
     </>}
     {message && <p role="status" className="status">{message}</p>}
     <footer>Built for the long game 🌿</footer>
