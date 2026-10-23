@@ -76,3 +76,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .goal-settings{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.goal-settings label{font-size:12px}
 .history-toggle{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;background:transparent;color:#24342c;padding:12px 0;flex-wrap:wrap}.history-toggle span{font-size:12px;color:#65856e}.history-details{padding:0 0 12px}
 @media(max-width:400px){.goal-settings{grid-template-columns:1fr 1fr}.day-toggle{padding:8px}}
+
+/* Per-set exercise logging */
+.set-counter{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:14px;background:#e7f0e5;border-radius:12px;color:#365f3f}
+.set-counter span{font-size:12px}
+#exercise-form form>button[type=submit]{width:100%;min-height:52px}
+#exercise-form input:disabled{opacity:.65;background:#f2f5f0}
