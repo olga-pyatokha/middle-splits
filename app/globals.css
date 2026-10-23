@@ -60,3 +60,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .export-history h3{font-size:16px;margin:0 0 6px}
 .export-history p{font-size:13px;margin-bottom:12px}
 .export-history button{width:100%;min-height:48px}
+
+/* Inline exercise detail cards and guided rep counter */
+.routine-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.routine-item>.guide-panel{grid-column:1/-1;width:100%;margin:4px 0 8px}
+.rep-progress{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:12px 0;font-size:14px}
+.rep-progress span{color:#65856e}
+@media(max-width:600px){.routine-item{grid-template-columns:minmax(0,1fr)}.routine-item>.guide-panel{grid-column:1}.routine-actions{display:block}.routine-actions button{width:100%}}
