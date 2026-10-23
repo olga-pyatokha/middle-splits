@@ -67,3 +67,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .rep-progress{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:12px 0;font-size:14px}
 .rep-progress span{color:#65856e}
 @media(max-width:600px){.routine-item{grid-template-columns:minmax(0,1fr)}.routine-item>.guide-panel{grid-column:1}.routine-actions{display:block}.routine-actions button{width:100%}}
+
+/* Collapsible day and session summaries, goals, and carry-over controls */
+.week-overview>div{min-width:0}.day-toggle{display:block;width:100%;text-align:left;border:0;min-height:44px;padding:10px;background:#f6f8f3;color:#365f3f;font-size:12px;font-weight:700}
+.day-details{background:#f7faf5;padding:12px;border-radius:10px;font-size:12px;overflow-wrap:anywhere}.day-details p{font-size:12px;margin:4px 0}
+.goal-progress{padding:14px;background:#f7faf5;border-radius:14px;margin:14px 0}.goal-progress h3{margin:0 0 6px;font-size:16px}.goal-progress p{font-size:13px}
+.goal-meter{height:8px;background:#dfe8de;border-radius:99px;overflow:hidden}.goal-meter span{display:block;height:100%;background:#568762}
+.goal-settings{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.goal-settings label{font-size:12px}
+.history-toggle{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;background:transparent;color:#24342c;padding:12px 0;flex-wrap:wrap}.history-toggle span{font-size:12px;color:#65856e}.history-details{padding:0 0 12px}
+@media(max-width:400px){.goal-settings{grid-template-columns:1fr 1fr}.day-toggle{padding:8px}}
