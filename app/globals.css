@@ -94,3 +94,18 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .next-preview{display:flex;flex-direction:column;gap:6px;margin:12px 0 18px}
 .next-preview span{padding:10px 12px;background:#f5f8f3;border-radius:10px;font-size:14px}
 .dashboard-panel>button{width:100%;min-height:52px}
+
+/* Progress analytics */
+.app-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}
+.app-tabs button{font-size:12px;padding:7px 3px}
+.progress-visual{padding:16px 12px;margin:14px 0;background:#f7faf5;border:1px solid #e1e9df;border-radius:14px}
+.progress-visual h3{margin-top:0}
+.progress-visual .progress-chart{width:100%;height:auto;max-height:250px;display:block}
+.session-bars{height:160px;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:16px 0 4px}
+.session-bar-column{min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px}
+.session-bar-column strong{height:14px;font-size:11px}
+.session-bar-track{flex:1;width:100%;max-width:28px;display:flex;align-items:flex-end;background:#e5eee3;border-radius:5px 5px 0 0;overflow:hidden}
+.session-bar-track>div{background:#426e50;width:100%;min-height:0;border-radius:5px 5px 0 0}
+.session-bar-column span{font-size:10px;color:#657568;white-space:nowrap}
+.forecast-date{font-size:24px;font-weight:750;color:#376547}
+@media(max-width:380px){.app-tabs button{font-size:11px}.dashboard-stats strong{font-size:17px}}
