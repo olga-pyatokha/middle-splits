@@ -125,3 +125,23 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .routine-item>div:not(.exercise-photo-crop){grid-column:2;grid-row:1;min-width:0}
 .routine-item>.routine-actions,.routine-item>.guide-panel{grid-column:1/-1}
 @media(max-width:420px){.routine-item{grid-template-columns:minmax(94px,36%) minmax(0,1fr);column-gap:10px}}
+
+/* Mobile workout layout: prevent narrow instruction columns and overlapping controls. */
+@media(max-width:600px){
+ .routine-item{display:flex;flex-direction:column;align-items:stretch;gap:12px}
+ .routine-item>.exercise-photo-crop,.routine-item>.exercise-picture{width:100%;max-width:100%;grid-column:auto;grid-row:auto;align-self:stretch}
+ .routine-item>.exercise-photo-crop{aspect-ratio:2.24}
+ .routine-item>.exercise-picture{max-height:220px;object-fit:contain}
+ .routine-item>div:not(.exercise-photo-crop){grid-column:auto;grid-row:auto;width:100%;min-width:0}
+ .routine-item>.routine-actions,.routine-item>.guide-panel{width:100%;grid-column:auto;grid-row:auto}
+ .routine-item .routine-actions{display:flex;flex-direction:column;gap:8px}
+ .routine-item .routine-actions button{width:100%;min-height:48px}
+ .routine-item .guide-panel{margin:0;padding:14px}
+ .routine-item .guide-panel button{max-width:100%;white-space:normal}
+ .routine-item .exercise-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .routine-item .exercise-links a{overflow-wrap:anywhere;font-size:13px;min-width:0}
+ .routine-item .rep-progress{align-items:center}
+ .routine-item .timer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .routine-item .timer-actions button{min-width:0}
+}
+@media(max-width:360px){.routine-item .exercise-links{grid-template-columns:1fr}}
