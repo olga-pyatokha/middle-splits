@@ -398,7 +398,7 @@ export default function Home() {
             </div>
             {item.reps == null && <label>Hold timer (seconds)
               <input type="number" min="1" max="600" value={timerDuration} onChange={e=>setGuideDuration(e.target.value)}/>
-            </label>
+            </label>}
             {item.reps == null && <div className="timer-display" role="timer" aria-live="off">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
             {item.reps == null && <div className="timer-actions">
               <button onClick={()=>{if(secondsLeft===0)setSecondsLeft(timerDuration);setTimerRunning(v=>!v)}}>{timerRunning?'Pause':'Start timer'}</button>
