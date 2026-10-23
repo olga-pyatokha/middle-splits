@@ -209,7 +209,7 @@ export default function Home() {
     const {data,error} = await supabase.from('exercise_logs').insert(payload)
       .select('id,session_id,exercise_name,side,sets,reps,hold_seconds,difficulty,notes,created_at').single();
     if (error) setMessage(error.message);
-    else { setExerciseLogs(current => [data,...current]); setExerciseNotes(''); setMessage('Exercise saved!'); }
+    else { setExerciseLogs(current => [data,...current]); setExerciseNotes(''); setMessage('Exercise saved!'); if(carry.includes(exerciseName))toggleCarry(exerciseName); }
     setExerciseSaving(false);
   }
 
@@ -232,7 +232,7 @@ export default function Home() {
       completed:false
     }).select('id,session_date,effort,notes,completed').single();
     if (error) setMessage(error.message);
-    else { setSessions(current=>[data,...current]); setActiveSession(data); setMessage('Session started. Log your exercises below.'); }
+    else { const next={...timings,[data.id]:{started:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>[data,...current]); setActiveSession(data); setMessage('Session started. Log your exercises below.'); }
     setSaving(false);
   }
 
@@ -245,11 +245,33 @@ export default function Home() {
       .eq('id',activeSession.id).eq('completed',false)
       .select('id,session_date,effort,notes,completed').single();
     if (error) setMessage(error.message);
-    else { setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setMessage('Session completed!'); }
+    else { const next={...timings,[data.id]:{...timings[data.id],ended:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setMessage('Session completed!'); }
     setSaving(false);
   }
 
   const [exporting, setExporting] = useState(false);
+  const [openDay, setOpenDay] = useState(null);
+  const [openHistory, setOpenHistory] = useState(null);
+  const [carry, setCarry] = useState([]);
+  const [timings, setTimings] = useState({});
+  const [goalDays, setGoalDays] = useState(3);
+  const [goalMinutes, setGoalMinutes] = useState(60);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(()=>{
+    if(!user)return;
+    const key='splits:'+user.id+':';
+    try {
+      setCarry(JSON.parse(localStorage.getItem(key+'carry')||'[]'));
+      setTimings(JSON.parse(localStorage.getItem(key+'timings')||'{}'));
+      setGoalDays(Number(localStorage.getItem(key+'days')||3));
+      setGoalMinutes(Number(localStorage.getItem(key+'minutes')||60));
+    } catch {}
+  },[user]);
+  useEffect(()=>{if(!activeSession)return;const id=setInterval(()=>setClock(Date.now()),1000);return ()=>clearInterval(id)},[activeSession]);
+  function persist(k,v){if(user)localStorage.setItem('splits:'+user.id+':'+k,JSON.stringify(v))}
+  function toggleCarry(name){const next=carry.includes(name)?carry.filter(n=>n!==name):[...carry,name];setCarry(next);persist('carry',next)}
+  function elapsed(s){const t=timings[s.id];return t?.started ? Math.max(0,Math.round(((t.ended?new Date(t.ended).getTime():clock)-new Date(t.started).getTime())/60000)) : null}
+
   async function exportTrainingHistory() {
     if (!user || !supabase || exporting) return;
     setExporting(true); setMessage('');
@@ -287,6 +309,13 @@ export default function Home() {
   }
 
   const suggestedWorkout = buildWorkout(workoutMinutes, sessions, exerciseLogs);
+  const workoutItems=[...carry.map(n=>EXERCISES.find(e=>e.name===n)).filter(Boolean),...suggestedWorkout.exercises.filter(e=>!carry.includes(e.name))];
+  const today=new Date(),monday=new Date(today.getFullYear(),today.getMonth(),today.getDate()-((today.getDay()+6)%7));
+  const mondayKey=[monday.getFullYear(),String(monday.getMonth()+1).padStart(2,'0'),String(monday.getDate()).padStart(2,'0')].join('-');
+  const weekSessions=sessions.filter(s=>s.completed&&s.session_date>=mondayKey);
+  const activeDays=new Set(weekSessions.map(s=>s.session_date)).size;
+  const weekMinutes=weekSessions.reduce((sum,s)=>sum+(elapsed(s)||0),0);
+
 
   if (!supabase) return <main className="shell"><h1>Middle Splits</h1><p>Set your Supabase environment variables to connect the app.</p></main>;
   if (loading) return <main className="shell"><p>Loading…</p></main>;
@@ -303,24 +332,30 @@ export default function Home() {
       {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
         <button disabled={saving} onClick={startWorkout}>{saving?'Starting…':'Start session'}</button></> :
         <><p className="active-indicator">● Active workout · {activeSession.session_date}</p>
-        <p>Log your exercises below. When you finish, add a session summary and end your workout.</p>
+        <p>Active time: {elapsed(activeSession)===null?'Not tracked on this device':elapsed(activeSession)+' min'}. Log exercises below, then finish your session.</p>
         <form onSubmit={endWorkout}><label>Overall effort <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
         <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
         <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
       </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>This week's training</h2></div><span className="spark">✦</span></div>
         <p>Middle splits and pancake, with lighter recovery days. Today's exercises take recent completed sessions into account.</p>
-        <div className="week-overview">{WEEK_LABELS.map((label,i)=><span key={label} className={i===new Date().getDay()?'week-day current':'week-day'}>{label}</span>)}</div>
+        <div className="week-overview">{WEEK_LABELS.map((label,i)=>{
+          const day=new Date(monday);day.setDate(day.getDate()+((i+6)%7));
+          const date=[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-');
+          const records=sessions.filter(s=>s.session_date===date);
+          return <div key={date}><button type="button" className="week-day day-toggle" aria-expanded={openDay===date} onClick={()=>setOpenDay(openDay===date?null:date)}>{label} {records.some(s=>s.completed)?'✓':''} {openDay===date?'↑':'↓'}</button>{openDay===date&&<div className="day-details"><strong>{date}</strong><p>{records.length?records.length+' session(s)':'No workout logged'}</p>{records.map(s=><p key={s.id}>{s.completed?'Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'}</p>)}</div>}</div>;
+        })}</div>
+        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Time tracking starts with new sessions on this device; older durations may be unavailable.</p></div>
         <label>Time available
           <select value={workoutMinutes} onChange={e=>setWorkoutMinutes(e.target.value)}>
             <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
           </select>
         </label>
         <h3>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</h3>
-        <div className="routine">{suggestedWorkout.exercises.map(item=>
+        <div className="routine">{workoutItems.map(item=>
           <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
-            <div className="routine-actions"><button className="routine-button" aria-expanded={guidedExercise?.name===item.name} onClick={()=>openGuide(item)}>{guidedExercise?.name===item.name?'Close exercise ↑':'Open exercise ↓'}</button></div>
+            <div className="routine-actions"><button className="routine-button" aria-expanded={guidedExercise?.name===item.name} onClick={()=>openGuide(item)}>{guidedExercise?.name===item.name?'Close exercise ↑':'Open exercise ↓'}</button><button className="quiet" onClick={()=>toggleCarry(item.name)}>{carry.includes(item.name)?'✓ Carried over':'↪ Do next time'}</button></div>
           {guidedExercise?.name===item.name && <div className="guide-panel">
             <p>{item.cue}</p>
             <p><strong>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s holds'}</strong> · ~{item.minutes} min including rest</p>
@@ -392,7 +427,7 @@ export default function Home() {
         </div>}
       </section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
-      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</article>)}</div>}
+      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
       <div className="export-history">
         <h3>Share your training history</h3>
         <p>Download your sessions, exercise feedback, measurements and plans as a JSON file to upload to ChatGPT. Your data stays private until you choose to share the file.</p>
