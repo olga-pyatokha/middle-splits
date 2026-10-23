@@ -183,7 +183,7 @@ export default function Home() {
     setGuidedExercise(item);
     setCompletedReps(0);
     setCompletedSets(0);
-    const duration = item.hold_seconds || (item.reps ? 5 : 30);
+    const duration = item.hold_seconds || 30;
     setTimerDuration(duration);
     setSecondsLeft(duration);
     setTimerRunning(false);
@@ -393,20 +393,20 @@ export default function Home() {
               <a href={exerciseSearchUrl(item.name,'youtube')} target="_blank" rel="noopener noreferrer">YouTube demos ↗</a>
               <a href={exerciseSearchUrl(item.name,'instagram')} target="_blank" rel="noopener noreferrer">Instagram demos ↗</a>
             </div>
-            <label>Timer per {item.reps != null ? 'rep' : 'hold'} (seconds)
+            {item.reps == null && <label>Hold timer (seconds)
               <input type="number" min="1" max="600" value={timerDuration} onChange={e=>setGuideDuration(e.target.value)}/>
             </label>
-            <div className="timer-display" role="timer" aria-live="off">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
-            <div className="timer-actions">
+            {item.reps == null && <div className="timer-display" role="timer" aria-live="off">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>
+            {item.reps == null && <div className="timer-actions">
               <button onClick={()=>{if(secondsLeft===0)setSecondsLeft(timerDuration);setTimerRunning(v=>!v)}}>{timerRunning?'Pause':'Start timer'}</button>
               <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(timerDuration)}}>Reset timer</button>
-            </div>
+            </div>}
             <div className="rep-progress"><strong>{completedSets} / {item.sets} sets complete</strong><span>{item.reps != null ? completedReps+' / '+item.reps+' reps in current set' : 'Tap after each hold'}</span></div>
             <div className="timer-actions">
               <button onClick={recordRep} disabled={completedSets>=item.sets}>✓ {item.reps != null?'Log rep':'Log hold'}</button>
-              <button className="routine-button" onClick={()=>{setCompletedReps(0);setCompletedSets(0);setTimerRunning(false);setSecondsLeft(timerDuration)}}>Restart count</button>
+              <button className="routine-button" onClick={()=>{setCompletedReps(0);setCompletedSets(0);setTimerRunning(false);setSecondsLeft(timerDuration)}}>Reset count</button>
             </div>
-            <p className="routine-note">Use the timer to pace each rep or hold. Stop if you feel pain or cramping. Rep counts here are temporary until you save the exercise.</p>
+            <p className="routine-note">{item.reps != null?'Count reps at your own pace. No per-rep timer.':'Use the timer for your hold.'} Stop if you feel pain or cramping. Save each set below.</p>
             <button onClick={()=>{prepareExercise(item);setReps(item.reps==null?'':String(item.reps));}}>Log a set ↓</button>
           </div>}
           </article>)}</div>
