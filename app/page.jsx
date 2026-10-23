@@ -74,6 +74,10 @@ export default function Home() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [exerciseSaving, setExerciseSaving] = useState(false);
+  const [setIndex, setSetIndex] = useState(1);
+  const [setFeedback, setSetFeedback] = useState('');
+  const [loggedSetCounts, setLoggedSetCounts] = useState({});
+  const [setTarget, setSetTarget] = useState(2);
   const [plan, setPlan] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
   const [workoutMinutes, setWorkoutMinutes] = useState('15');
@@ -161,7 +165,9 @@ export default function Home() {
 
   function prepareExercise(item) {
     if (!activeSession) { setMessage('Start a session to log this exercise.'); document.getElementById('session-control')?.scrollIntoView({behavior:'smooth'}); return; }
-    setExerciseName(item.name); setSide('both'); setSets(String(item.sets));
+    setExerciseName(item.name); setSide('both'); setSets('1'); setSetTarget(item.sets);
+    const savedCount = exerciseLogs.filter(l=>l.session_id===activeSession.id && l.exercise_name===item.name && l.notes?.startsWith('[Set ')).length;
+    setSetIndex(savedCount+1); setLoggedSetCounts(v=>({...v,[item.name]:savedCount})); setSetFeedback('');
     setReps(item.reps == null ? '' : String(item.reps));
     setHoldSeconds(item.hold_seconds == null ? '' : String(item.hold_seconds));
     setExerciseNotes(item.cue || '');
@@ -203,13 +209,19 @@ export default function Home() {
     if (!activeSession) { setMessage('Start a workout session first.'); return; }
     setExerciseSaving(true); setMessage('');
     const payload = { user_id: user.id, session_id: activeSession.id, exercise_name: exerciseName.trim(),
-      side, sets: Number(sets), reps: reps === '' ? null : Number(reps),
+      side, sets: 1, reps: reps === '' ? null : Number(reps),
       hold_seconds: holdSeconds === '' ? null : Number(holdSeconds),
-      difficulty: Number(difficulty), notes: exerciseNotes.trim() };
+      difficulty: Number(difficulty), notes: '[Set '+setIndex+'] '+[setFeedback.trim(),exerciseNotes.trim()].filter(Boolean).join(' · ') };
     const {data,error} = await supabase.from('exercise_logs').insert(payload)
       .select('id,session_id,exercise_name,side,sets,reps,hold_seconds,difficulty,notes,created_at').single();
     if (error) setMessage(error.message);
-    else { setExerciseLogs(current => [data,...current]); setExerciseNotes(''); setMessage('Exercise saved!'); if(carry.includes(exerciseName))toggleCarry(exerciseName); }
+    else {
+      setExerciseLogs(current => [data,...current]);
+      setLoggedSetCounts(current=>({...current,[exerciseName]:(current[exerciseName]||0)+1}));
+      setSetIndex(v=>v+1); setSetFeedback(''); setExerciseNotes('');
+      setMessage('Set '+setIndex+' saved!');
+      if(carry.includes(exerciseName))toggleCarry(exerciseName);
+    }
     setExerciseSaving(false);
   }
 
@@ -381,7 +393,7 @@ export default function Home() {
               <button className="routine-button" onClick={()=>{setCompletedReps(0);setCompletedSets(0);setTimerRunning(false);setSecondsLeft(timerDuration)}}>Restart count</button>
             </div>
             <p className="routine-note">Use the timer to pace each rep or hold. Stop if you feel pain or cramping. Rep counts here are temporary until you save the exercise.</p>
-            <button onClick={()=>{prepareExercise(item);setSets(String(completedSets || item.sets));setReps(item.reps==null?'':String(item.reps));}}>Save exercise details ↓</button>
+            <button onClick={()=>{prepareExercise(item);setReps(item.reps==null?'':String(item.reps));}}>Log a set ↓</button>
           </div>}
           </article>)}</div>
         <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
@@ -390,17 +402,20 @@ export default function Home() {
       <p>{activeSession ? 'Exercises automatically save to your active session.' : 'Start a session above to log exercises.'}</p>
       <form onSubmit={saveExercise}>
 
-        <label>Exercise<select value={exerciseName} onChange={e=>setExerciseName(e.target.value)}>
+        <label>Exercise<select value={exerciseName} onChange={e=>{setExerciseName(e.target.value);setSetIndex(1);setSetFeedback('');setLoggedSetCounts(v=>({...v,[e.target.value]:exerciseLogs.filter(l=>l.session_id===activeSession?.id&&l.exercise_name===e.target.value&&l.notes?.startsWith('[Set ')).length}));}}>
           {[...EXERCISES.map(e=>e.name),'Other'].map(name=><option key={name} value={name}>{name}</option>)}
         </select></label>
         {exerciseName==='Other' && <p>Use the notes field to specify the exercise.</p>}
         <label>Side<select value={side} onChange={e=>setSide(e.target.value)}><option value="both">Both / center</option><option value="left">Left</option><option value="right">Right</option></select></label>
-        <div className="fields"><label>Sets<input type="number" min="1" max="100" required value={sets} onChange={e=>setSets(e.target.value)}/></label>
+        <div className="set-counter"><strong>Set {setIndex} of {setTarget}</strong><span>{exerciseLogs.filter(l=>l.session_id===activeSession?.id&&l.exercise_name===exerciseName&&l.notes?.startsWith('[Set ')).length} saved this session</span></div>
+        <div className="fields"><label>Sets<input type="number" min="1" max="100" value="1" disabled readOnly/></label>
         <label>Reps<input type="number" min="0" max="1000" value={reps} onChange={e=>setReps(e.target.value)}/></label>
         <label>Hold (seconds)<input type="number" min="0" step="0.5" value={holdSeconds} onChange={e=>setHoldSeconds(e.target.value)}/></label></div>
         <label>Difficulty <strong>{difficulty}/10</strong><input type="range" min="1" max="10" value={difficulty} onChange={e=>setDifficulty(e.target.value)}/></label>
-        <label>Exercise notes<textarea rows="3" placeholder="Cramping, range of motion, left/right difference…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
-        <button disabled={exerciseSaving || !activeSession} type="submit">{exerciseSaving?'Saving…':'Save exercise'}</button>
+        <label>How did this set feel?<textarea rows="2" placeholder="Range, control, cramping, left/right difference…" value={setFeedback} onChange={e=>setSetFeedback(e.target.value)}/></label>
+        <label>Additional exercise notes<textarea rows="2" placeholder="Optional notes…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
+        <button disabled={exerciseSaving || !activeSession} type="submit">{exerciseSaving?'Saving…':'✓ Save set '+setIndex}</button>
+        <p className="routine-note">Each tap saves one set separately, with its own reps, hold duration, difficulty and feedback. You can adjust the next set before saving.</p>
       </form></section>
       <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
         <p>Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time. A smaller gap means you are closer to the floor.</p>
