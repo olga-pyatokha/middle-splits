@@ -108,7 +108,7 @@ export default function Home() {
   useEffect(() => {
     if (!user || !supabase) { setSessions([]); setActiveSession(null); return; }
     let active = true;
-    supabase.from('sessions').select('id,session_date,effort,notes,completed').order('session_date', { ascending: false }).limit(30)
+    supabase.from('sessions').select('id,session_date,effort,notes,completed,duration_minutes,started_at').order('session_date', { ascending: false }).limit(30)
       .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else { setSessions(data ?? []); setActiveSession((data ?? []).find(s=>s.completed===false) ?? null); } } });
     return () => { active = false; };
   }, [user]);
@@ -245,10 +245,10 @@ export default function Home() {
     const localDate = [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
     const { data, error } = await supabase.from('sessions').insert({
       user_id:user.id, session_date:localDate, plan_id:plan?.id ?? null,
-      completed:false
-    }).select('id,session_date,effort,notes,completed').single();
+      started_at:new Date().toISOString(), completed:false
+    }).select('id,session_date,effort,notes,completed,duration_minutes,started_at').single();
     if (error) setMessage(error.message);
-    else { const next={...timings,[data.id]:{started:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>[data,...current]); setActiveSession(data); setScreen('session');setSessionStage('exercises'); setMessage('Session started. Log your exercises below.'); }
+    else { setSessions(current=>[data,...current]); setActiveSession(data); setScreen('session');setSessionStage('exercises'); setMessage('Session started. Log your exercises below.'); }
     setSaving(false);
   }
 
@@ -257,11 +257,11 @@ export default function Home() {
     if (!activeSession || saving) return;
     setSaving(true); setMessage('');
     const {data,error} = await supabase.from('sessions')
-      .update({effort:Number(effort),notes:notes.trim(),completed:true})
+      .update({effort:Number(effort),notes:notes.trim(),completed:true,duration_minutes:Math.max(0,Math.min(480,elapsed(activeSession) ?? 0))})
       .eq('id',activeSession.id).eq('completed',false)
-      .select('id,session_date,effort,notes,completed').single();
+      .select('id,session_date,effort,notes,completed,duration_minutes,started_at').single();
     if (error) setMessage(error.message);
-    else { const next={...timings,[data.id]:{...timings[data.id],ended:new Date().toISOString()}};setTimings(next);persist('timings',next);setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setSessionStage('measurement');setScreen('session');setMessage('Session completed. Add a measurement if you want, or finish.'); }
+    else { setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setSessionStage('measurement');setScreen('session');setMessage('Session completed. Add a measurement if you want, or finish.'); }
     setSaving(false);
   }
 
@@ -271,24 +271,54 @@ export default function Home() {
   const [openDay, setOpenDay] = useState(null);
   const [openHistory, setOpenHistory] = useState(null);
   const [carry, setCarry] = useState([]);
-  const [timings, setTimings] = useState({});
   const [goalDays, setGoalDays] = useState(3);
   const [goalMinutes, setGoalMinutes] = useState(60);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [clock, setClock] = useState(Date.now());
   useEffect(()=>{
-    if(!user)return;
-    const key='splits:'+user.id+':';
-    try {
-      setCarry(JSON.parse(localStorage.getItem(key+'carry')||'[]'));
-      setTimings(JSON.parse(localStorage.getItem(key+'timings')||'{}'));
-      setGoalDays(Number(localStorage.getItem(key+'days')||3));
-      setGoalMinutes(Number(localStorage.getItem(key+'minutes')||60));
-    } catch {}
+    if(!user || !supabase){setPreferencesLoaded(false);return;}
+    let active=true;
+    async function loadPreferences(){
+      const {data,error}=await supabase.from('user_preferences').select('goal_days,goal_minutes,carry_exercises').eq('user_id',user.id).maybeSingle();
+      if(!active)return;
+      if(error){setMessage('Could not load training preferences: '+error.message);return;}
+      if(data){
+        setGoalDays(data.goal_days);setGoalMinutes(data.goal_minutes);
+        setCarry(Array.isArray(data.carry_exercises)?data.carry_exercises:[]);
+      }else{
+        const key='splits:'+user.id+':';
+        let days=3,minutes=60,items=[];
+        try {
+          days=Number(JSON.parse(localStorage.getItem(key+'days')||'3'));
+          minutes=Number(JSON.parse(localStorage.getItem(key+'minutes')||'60'));
+          items=JSON.parse(localStorage.getItem(key+'carry')||'[]');
+        }catch{}
+        days=Math.max(1,Math.min(7,days||3));minutes=Math.max(5,Math.min(1000,minutes||60));
+        if(!Array.isArray(items))items=[];
+        const {error:saveError}=await supabase.from('user_preferences').upsert({user_id:user.id,goal_days:days,goal_minutes:minutes,carry_exercises:items},{onConflict:'user_id'});
+        if(!active)return;
+        if(saveError)setMessage('Could not sync preferences: '+saveError.message);
+        setGoalDays(days);setGoalMinutes(minutes);setCarry(items);
+      }
+      setPreferencesLoaded(true);
+    }
+    loadPreferences();
+    return ()=>{active=false};
   },[user]);
   useEffect(()=>{if(!activeSession)return;const id=setInterval(()=>setClock(Date.now()),1000);return ()=>clearInterval(id)},[activeSession]);
-  function persist(k,v){if(user)localStorage.setItem('splits:'+user.id+':'+k,JSON.stringify(v))}
+  async function persist(k,v){
+    if(!user || !supabase || !preferencesLoaded)return;
+    const column={days:'goal_days',minutes:'goal_minutes',carry:'carry_exercises'}[k];
+    if(!column)return;
+    const {error}=await supabase.from('user_preferences').upsert({user_id:user.id,[column]:v,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+    if(error)setMessage('Could not save preferences: '+error.message);
+  }
   function toggleCarry(name){const next=carry.includes(name)?carry.filter(n=>n!==name):[...carry,name];setCarry(next);persist('carry',next)}
-  function elapsed(s){const t=timings[s.id];return t?.started ? Math.max(0,Math.round(((t.ended?new Date(t.ended).getTime():clock)-new Date(t.started).getTime())/60000)) : null}
+  function elapsed(s){
+    if(s.duration_minutes!=null)return Number(s.duration_minutes);
+    if(!s.started_at)return null;
+    return s.completed?null:Math.max(0,Math.round((clock-new Date(s.started_at).getTime())/60000));
+  }
 
   async function exportTrainingHistory() {
     if (!user || !supabase || exporting) return;
@@ -362,7 +392,7 @@ export default function Home() {
           const records=sessions.filter(s=>s.session_date===date);
           return <div key={date}><button type="button" className="week-day day-toggle" aria-expanded={openDay===date} onClick={()=>setOpenDay(openDay===date?null:date)}>{label} {records.some(s=>s.completed)?'✓':''} {openDay===date?'↑':'↓'}</button>{openDay===date&&<div className="day-details"><strong>{date}</strong><p>{records.length?records.length+' session(s)':'No workout logged'}</p>{records.map(s=><p key={s.id}>{s.completed?'Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'}</p>)}</div>}</div>;
         })}</div>
-        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Time tracking starts with new sessions on this device; older durations may be unavailable.</p></div>
+        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Session durations now sync across devices; older durations may be unavailable.</p></div>
       </section>}
       {screen==='session' && <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
       {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
