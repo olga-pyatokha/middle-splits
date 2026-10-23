@@ -82,3 +82,15 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .set-counter span{font-size:12px}
 #exercise-form form>button[type=submit]{width:100%;min-height:52px}
 #exercise-form input:disabled{opacity:.65;background:#f2f5f0}
+
+/* Screen-level navigation and compact overview */
+.app-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 14px;position:sticky;top:0;z-index:5;background:#fafcf8;padding:8px 0}
+.app-tabs button{font-size:13px;min-height:46px;background:#eef2eb;color:#36533c;border-radius:12px;padding:8px}
+.app-tabs button.selected{background:#376547;color:white}
+.dashboard-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0 22px}
+.dashboard-stats>div{padding:12px 8px;background:#f0f6ed;border-radius:12px;min-width:0}
+.dashboard-stats strong{display:block;font-size:21px;color:#315e3d}
+.dashboard-stats span{font-size:11px;color:#667a68;display:block}
+.next-preview{display:flex;flex-direction:column;gap:6px;margin:12px 0 18px}
+.next-preview span{padding:10px 12px;background:#f5f8f3;border-radius:10px;font-size:14px}
+.dashboard-panel>button{width:100%;min-height:52px}
