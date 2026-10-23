@@ -34,8 +34,12 @@ const WEEK_LABELS = ['Sun · Recovery', 'Mon · Middle splits', 'Tue · Pancake'
 function buildWorkout(minutes, sessions, logs) {
   const today = new Date();
   const todayKey = [today.getFullYear(), String(today.getMonth()+1).padStart(2,'0'), String(today.getDate()).padStart(2,'0')].join('-');
-  const day = today.getDay();
-  const recentSessions = sessions.filter(s => s.completed && s.session_date < todayKey && (new Date(todayKey+'T12:00:00')-new Date(s.session_date+'T12:00:00'))/86400000 <= 2);
+  // Once today's workout is complete, preview the following day's lesson instead of repeating today's focus.
+  const finishedToday = sessions.some(s => s.completed && s.session_date === todayKey);
+  const previewDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + (finishedToday ? 1 : 0));
+  const day = previewDate.getDay();
+  const previewKey = [previewDate.getFullYear(), String(previewDate.getMonth()+1).padStart(2,'0'), String(previewDate.getDate()).padStart(2,'0')].join('-');
+  const recentSessions = sessions.filter(s => s.completed && s.session_date < previewKey && (new Date(previewKey+'T12:00:00')-new Date(s.session_date+'T12:00:00'))/86400000 <= 2);
   const recentNames = new Set(logs.filter(l => recentSessions.some(s => s.id === l.session_id)).map(l => l.exercise_name));
   const focus = WEEK_FOCUS[day];
   const order = focus === 'recovery' ? ['mobility','pancake'] :
@@ -51,7 +55,7 @@ function buildWorkout(minutes, sessions, logs) {
     if (used.has(e.name) || e.minutes > remaining) continue;
     selected.push(e); used.add(e.name); remaining -= e.minutes;
   }
-  return { label: WEEK_LABELS[day], exercises: selected, estimated: Number(minutes)-remaining };
+  return { label: WEEK_LABELS[day], exercises: selected, estimated: Number(minutes)-remaining, previewDate: previewKey, isNextDay: finishedToday };
 }
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -346,7 +350,7 @@ export default function Home() {
       {screen==='home' && <section className="panel dashboard-panel">
         <span className="eyebrow">YOUR PROGRESS</span><h2>Training overview</h2>
         <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length?Number(measurements[measurements.length-1].value_cm)+' cm':'—'}</strong><span>Latest split gap</span></div></div>
-        <h3>Next session</h3><p>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</p>
+        <h3>{suggestedWorkout.isNextDay?'Up next · Tomorrow':'Next session'}</h3><p>{suggestedWorkout.label} · {suggestedWorkout.previewDate} · About {suggestedWorkout.estimated} min</p>
         <div className="next-preview">{workoutItems.length?workoutItems.map(item=><span key={item.name}>{item.name}</span>):<span>No exercises planned</span>}</div>
         <button onClick={()=>{setScreen('session');setSessionStage('exercises')}}>{activeSession?'Continue session →':'View session →'}</button>
       </section>}
@@ -373,7 +377,7 @@ export default function Home() {
             <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
           </select>
         </label>
-        <h3>{suggestedWorkout.label} · About {suggestedWorkout.estimated} min</h3><p className="routine-note">Open an exercise to see guidance and timing. Log sets after starting the session.</p>
+        <h3>{suggestedWorkout.label} · {suggestedWorkout.previewDate} · About {suggestedWorkout.estimated} min</h3><p className="routine-note">Open an exercise to see guidance and timing. Log sets after starting the session.</p>
         <div className="routine">{workoutItems.map(item=>
           <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
