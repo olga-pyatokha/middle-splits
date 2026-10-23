@@ -346,7 +346,7 @@ export default function Home() {
       <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
       <button className="link" onClick={()=>{setMode(mode==='signin'?'signup':'signin');setMessage('');}}>{mode==='signin'?'New here? Create an account':'Already registered? Sign in'}</button>
     </section> : <>
-      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Home</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Workout</button><button className={screen==='progress'?'selected':''} onClick={()=>setScreen('progress')}>↗ Progress</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>▤ History</button></nav>
+      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Home</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Workout</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>↗ Progress</button></nav>
       {screen==='home' && <section className="panel dashboard-panel">
         <span className="eyebrow">YOUR PROGRESS</span><h2>Training overview</h2>
         <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length?Number(measurements[measurements.length-1].value_cm)+' cm':'—'}</strong><span>Latest split gap</span></div></div>
@@ -459,7 +459,7 @@ export default function Home() {
           <div className="history">{[...measurements].reverse().slice(0,8).map(m=><article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up?'Warmed up':'Not warmed up'}{m.notes?' · '+m.notes:''}</p></article>)}</div>
         </div>}
       </section>}
-      {screen==='progress' && <section className="panel progress-screen">
+      {screen==='history' && <section className="panel progress-screen">
         <span className="eyebrow">YOUR JOURNEY</span><h2>Split progress</h2>
         {(() => {
           const points = measurements.filter(m=>Number.isFinite(Number(m.value_cm)) && Number(m.value_cm)>=0)
@@ -495,7 +495,7 @@ export default function Home() {
           </>;
         })()}
       </section>}
-      {screen==='history' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
+      {screen==='history' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">TRAINING LOG</span><h2>Session history</h2></div><span className="count">{sessions.length}</span></div>
       {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
       <div className="export-history">
         <h3>Share your training history</h3>
