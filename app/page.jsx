@@ -22,6 +22,29 @@ const EXERCISE_MEDIA = {
   'Seated pancake hold': { url: 'https://www.youtube.com/results?search_query=seated+pancake+stretch+form', label: 'Find video examples' },
   'Wide-stance lateral weight shifts': { url: 'https://www.youtube.com/results?search_query=wide+stance+lateral+weight+shifts+mobility', label: 'Find video examples' }
 };
+const EXERCISE_POSES = {
+  'Quadruped rock-backs': { body:[72,60,115,62], limbs:[[72,60,52,87],[115,62,132,86],[52,87,36,87],[132,86,148,86]], head:[128,48] },
+  'Adductor rock-backs': { body:[70,60,113,62], limbs:[[70,60,48,91],[113,62,128,89],[48,91,25,91],[128,89,176,89]], head:[127,47] },
+  'Frog stretch': { body:[90,48,90,76], limbs:[[90,49,62,72],[90,49,118,72],[90,76,43,91],[90,76,137,91]], head:[90,34] },
+  'Supported middle split hold': { body:[90,31,90,70], limbs:[[90,70,20,95],[90,70,160,95],[90,44,61,76],[90,44,119,76]], head:[90,18] },
+  'Elevated pancake good mornings': { body:[87,43,117,73], limbs:[[117,73,25,96],[117,73,173,96],[91,49,115,84],[91,49,135,79]], head:[77,33] },
+  'Seated pancake hold': { body:[92,43,120,76], limbs:[[120,76,23,96],[120,76,175,96],[99,51,136,87],[99,51,146,84]], head:[81,33] },
+  'Seated straddle compression lifts': { body:[90,32,90,70], limbs:[[90,70,23,82],[90,70,158,82],[90,42,65,69],[90,42,114,69]], head:[90,18] },
+  'Wide-stance lateral weight shifts': { body:[90,30,76,66], limbs:[[76,66,25,93],[76,66,158,93],[85,42,53,59],[85,42,119,56]], head:[90,17] }
+};
+function ExercisePicture({name}) {
+  const pose=EXERCISE_POSES[name];
+  if (!pose) return null;
+  return <svg className="exercise-picture" viewBox="0 0 180 110" role="img" aria-label={name+' position illustration'} xmlns="http://www.w3.org/2000/svg">
+    <rect width="180" height="110" rx="12" fill="#edf4ee"/>
+    <path d="M12 99 H168" stroke="#a9bfae" strokeWidth="2"/>
+    {name==='Elevated pancake good mornings' && <rect x="103" y="78" width="29" height="13" rx="3" fill="#c4aa83"/>}
+    {name==='Supported middle split hold' && <><rect x="49" y="77" width="23" height="19" rx="3" fill="#c4aa83"/><rect x="108" y="77" width="23" height="19" rx="3" fill="#c4aa83"/></>}
+    {pose.limbs.map((l,i)=><line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke="#446c57" strokeWidth="7" strokeLinecap="round"/>)}
+    <line x1={pose.body[0]} y1={pose.body[1]} x2={pose.body[2]} y2={pose.body[3]} stroke="#446c57" strokeWidth="11" strokeLinecap="round"/>
+    <circle cx={pose.head[0]} cy={pose.head[1]} r="10" fill="#d9a57f" stroke="#446c57" strokeWidth="2"/>
+  </svg>;
+}
 function exerciseSearchUrl(name, platform) {
   const query = encodeURIComponent(name + ' exercise demonstration');
   return platform === 'instagram'
@@ -412,7 +435,7 @@ export default function Home() {
         </label>
         <h3>{suggestedWorkout.label} · {suggestedWorkout.previewDate} · About {suggestedWorkout.estimated} min</h3><p className="routine-note">Open an exercise to see guidance and timing. Log sets after starting the session.</p>
         <div className="routine">{workoutItems.map(item=>
-          <article className="routine-item" key={item.name}><div><strong>{item.name}</strong>
+          <article className="routine-item" key={item.name}><ExercisePicture name={item.name}/><div><strong>{item.name}</strong>
             <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
             <div className="routine-actions"><button className="routine-button" aria-expanded={guidedExercise?.name===item.name} onClick={()=>openGuide(item)}>{guidedExercise?.name===item.name?'Close exercise ↑':'Open exercise ↓'}</button><button className="quiet" onClick={()=>toggleCarry(item.name)}>{carry.includes(item.name)?'✓ Carried over':'↪ Do next time'}</button></div>
           {guidedExercise?.name===item.name && <div className="guide-panel">
