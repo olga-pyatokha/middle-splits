@@ -354,6 +354,16 @@ export default function Home() {
         <div className="next-preview">{workoutItems.length?workoutItems.map(item=><span key={item.name}>{item.name}</span>):<span>No exercises planned</span>}</div>
         <button onClick={()=>{setScreen('session');setSessionStage('exercises')}}>{activeSession?'Continue session →':'View session →'}</button>
       </section>}
+      {screen==='home' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR WEEK</span><h2>Weekly training</h2></div><span className="spark">✦</span></div>
+        <p>Tap a day to see what you've completed. Your goals and weekly progress live here, separate from the workout screen.</p>
+        <div className="week-overview">{WEEK_LABELS.map((label,i)=>{
+          const day=new Date(monday);day.setDate(day.getDate()+((i+6)%7));
+          const date=[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-');
+          const records=sessions.filter(s=>s.session_date===date);
+          return <div key={date}><button type="button" className="week-day day-toggle" aria-expanded={openDay===date} onClick={()=>setOpenDay(openDay===date?null:date)}>{label} {records.some(s=>s.completed)?'✓':''} {openDay===date?'↑':'↓'}</button>{openDay===date&&<div className="day-details"><strong>{date}</strong><p>{records.length?records.length+' session(s)':'No workout logged'}</p>{records.map(s=><p key={s.id}>{s.completed?'Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'}</p>)}</div>}</div>;
+        })}</div>
+        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Time tracking starts with new sessions on this device; older durations may be unavailable.</p></div>
+      </section>}
       {screen==='session' && <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
       {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
         <button disabled={saving} onClick={startWorkout}>{saving?'Starting…':'Start session'}</button></> :
@@ -363,15 +373,8 @@ export default function Home() {
         <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
         <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
       </section>}
-      {screen==='session' && sessionStage==='exercises' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR ROUTINE</span><h2>This week's training</h2></div><span className="spark">✦</span></div>
-        <p>Middle splits and pancake, with lighter recovery days. Today's exercises take recent completed sessions into account.</p>
-        <div className="week-overview">{WEEK_LABELS.map((label,i)=>{
-          const day=new Date(monday);day.setDate(day.getDate()+((i+6)%7));
-          const date=[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-');
-          const records=sessions.filter(s=>s.session_date===date);
-          return <div key={date}><button type="button" className="week-day day-toggle" aria-expanded={openDay===date} onClick={()=>setOpenDay(openDay===date?null:date)}>{label} {records.some(s=>s.completed)?'✓':''} {openDay===date?'↑':'↓'}</button>{openDay===date&&<div className="day-details"><strong>{date}</strong><p>{records.length?records.length+' session(s)':'No workout logged'}</p>{records.map(s=><p key={s.id}>{s.completed?'Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'}</p>)}</div>}</div>;
-        })}</div>
-        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Time tracking starts with new sessions on this device; older durations may be unavailable.</p></div>
+      {screen==='session' && sessionStage==='exercises' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">WORKOUT</span><h2>Session exercises</h2></div><span className="spark">✦</span></div>
+        <p>Open an exercise for guidance and log each set while your session is active.</p>
         <label>Time available
           <select value={workoutMinutes} onChange={e=>setWorkoutMinutes(e.target.value)}>
             <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
