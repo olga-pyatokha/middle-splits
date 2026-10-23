@@ -346,7 +346,7 @@ export default function Home() {
       <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
       <button className="link" onClick={()=>{setMode(mode==='signin'?'signup':'signin');setMessage('');}}>{mode==='signin'?'New here? Create an account':'Already registered? Sign in'}</button>
     </section> : <>
-      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Overview</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Session</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>▤ History</button></nav>
+      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Home</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Workout</button><button className={screen==='progress'?'selected':''} onClick={()=>setScreen('progress')}>↗ Progress</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>▤ History</button></nav>
       {screen==='home' && <section className="panel dashboard-panel">
         <span className="eyebrow">YOUR PROGRESS</span><h2>Training overview</h2>
         <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length?Number(measurements[measurements.length-1].value_cm)+' cm':'—'}</strong><span>Latest split gap</span></div></div>
@@ -458,6 +458,42 @@ export default function Home() {
           </svg></div>}
           <div className="history">{[...measurements].reverse().slice(0,8).map(m=><article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up?'Warmed up':'Not warmed up'}{m.notes?' · '+m.notes:''}</p></article>)}</div>
         </div>}
+      </section>}
+      {screen==='progress' && <section className="panel progress-screen">
+        <span className="eyebrow">YOUR JOURNEY</span><h2>Split progress</h2>
+        {(() => {
+          const points = measurements.filter(m=>Number.isFinite(Number(m.value_cm)) && Number(m.value_cm)>=0)
+            .map(m=>({date:new Date(m.measured_at),gap:Number(m.value_cm)})).filter(m=>!Number.isNaN(m.date.getTime()))
+            .sort((a,b)=>a.date-b.date);
+          const first=points[0], last=points[points.length-1];
+          const rangeDays=points.length>1?(last.date-first.date)/86400000:0;
+          const xs=points.map(p=>(p.date-first.date)/86400000);
+          const meanX=xs.reduce((a,b)=>a+b,0)/Math.max(1,xs.length);
+          const meanY=points.reduce((a,p)=>a+p.gap,0)/Math.max(1,points.length);
+          const denom=xs.reduce((a,x)=>a+(x-meanX)**2,0);
+          const slope=denom>0?xs.reduce((a,x,i)=>a+(x-meanX)*(points[i].gap-meanY),0)/denom:0;
+          const enough=points.length>=3 && rangeDays>=14 && slope<0 && last.gap>0;
+          const daysToZero=enough?last.gap/-slope:null;
+          const plausible=enough && daysToZero>=14 && daysToZero<=3650;
+          const forecast=plausible?new Date(last.date.getTime()+daysToZero*86400000):null;
+          const values=points.map(p=>p.gap);
+          const low=Math.min(0,...values), high=Math.max(1,...values);
+          const xAt=i=>points.length===1?160:28+i*264/(points.length-1);
+          const yAt=v=>132-(v-low)/(high-low)*108;
+          const path=points.map((p,i)=>xAt(i)+','+yAt(p.gap)).join(' ');
+          const completed=sessions.filter(s=>s.completed);
+          const weeks=Array.from({length:8},(_,i)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)-(7-i)*7);const end=new Date(d);end.setDate(end.getDate()+7);return {date:d,count:completed.filter(s=>{const t=new Date(s.session_date+'T12:00:00');return t>=d&&t<end}).length};});
+          const maxSessions=Math.max(1,...weeks.map(w=>w.count));
+          return <>
+            <div className="dashboard-stats"><div><strong>{last?last.gap+' cm':'—'}</strong><span>Latest gap</span></div><div><strong>{points.length>1?(first.gap-last.gap>0?'−':first.gap-last.gap<0?'+':'')+Math.abs(first.gap-last.gap).toFixed(1)+' cm':'—'}</strong><span>Gap change</span></div><div><strong>{completed.length}</strong><span>Sessions completed</span></div></div>
+            <div className="progress-visual"><h3>Distance to middle split</h3><p className="routine-note">Floor-to-pelvis gap · lower is closer to a full split</p>
+              {points.length?<><svg viewBox="0 0 320 166" role="img" aria-label="Middle split gap measurements over time" className="progress-chart"><line x1="28" y1="132" x2="292" y2="132" stroke="#bacbbc"/><line x1="28" y1="24" x2="292" y2="24" stroke="#e1e9df"/><text x="2" y="27" fontSize="10" fill="#647569">{high.toFixed(0)}</text><text x="8" y="135" fontSize="10" fill="#647569">{low.toFixed(0)}</text><polyline points={path} fill="none" stroke="#426e50" strokeWidth="3" strokeLinejoin="round"/>{points.map((p,i)=><circle key={i} cx={xAt(i)} cy={yAt(p.gap)} r="4" fill="#426e50"/>)}<text x="28" y="153" fontSize="10" fill="#647569">{first.date.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</text><text x="292" y="153" fontSize="10" fill="#647569" textAnchor="end">{last.date.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</text></svg><p className="routine-note">{points.length} measurement{points.length===1?'':'s'} recorded</p></>:<p>No measurements yet. Record your split gap after a workout to start tracking.</p>}
+            </div>
+            <div className="progress-visual"><h3>Sessions over the last 8 weeks</h3><div className="session-bars">{weeks.map((w,i)=><div key={i} className="session-bar-column"><strong>{w.count||''}</strong><div className="session-bar-track"><div style={{height:(w.count/maxSessions*100)+'%'}}/></div><span>{w.date.toLocaleDateString(undefined,{month:'numeric',day:'numeric'})}</span></div>)}</div><p className="routine-note">{completed.length} completed sessions total · recent activity shown by week</p></div>
+            <div className="progress-visual"><h3>When might I reach a full split?</h3>{forecast?<><p className="forecast-date">{forecast.toLocaleDateString(undefined,{month:'long',year:'numeric'})}</p><p>This is a rough straight-line projection from your measured trend, not a reliable deadline. Flexibility gains are rarely linear, and progress can slow or plateau.</p></>:<><p><strong>Not enough progress data for a meaningful estimate yet.</strong></p><p>We need at least 3 measurements spanning 2 weeks and a downward gap trend. Even then, a forecast will be a rough extrapolation, not a guarantee.</p></>}
+            <p className="routine-note">Measure consistently after warming up, using the same setup. A 0 cm gap alone does not guarantee a safe or comfortable full split.</p></div>
+          </>;
+        })()}
       </section>}
       {screen==='history' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">HISTORY</span><h2>Recent sessions</h2></div><span className="count">{sessions.length}</span></div>
       {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
