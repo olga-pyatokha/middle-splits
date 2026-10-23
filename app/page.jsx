@@ -33,8 +33,25 @@ const EXERCISE_POSES = {
   'Wide-stance lateral weight shifts': { body:[90,30,76,66], limbs:[[76,66,25,93],[76,66,158,93],[85,42,53,59],[85,42,119,56]], head:[90,17] }
 };
 function ExercisePicture({name}) {
+  const [photoUnavailable,setPhotoUnavailable]=useState(false);
   const pose=EXERCISE_POSES[name];
   if (!pose) return null;
+  const panelIndex={
+    'Frog stretch':0,
+    'Adductor rock-backs':1,
+    'Seated pancake hold':2,
+    'Elevated pancake good mornings':3,
+    'Seated straddle compression lifts':4,
+    'Wide-stance lateral weight shifts':5,
+    'Supported middle split hold':6
+  }[name];
+  if (panelIndex!==undefined && !photoUnavailable) {
+    const col=panelIndex%2, row=Math.floor(panelIndex/2);
+    return <div className="exercise-photo-crop" role="img" aria-label={name+' illustrated positioning guide'}>
+      <img src="/exercise-guide.png" loading="lazy" alt="" onError={()=>setPhotoUnavailable(true)}
+        style={{left:col===0?'0':'-100%',top:'-'+row*100+'%'}}/>
+    </div>;
+  }
   return <svg className="exercise-picture" viewBox="0 0 180 110" role="img" aria-label={name+' position illustration'} xmlns="http://www.w3.org/2000/svg">
     <rect width="180" height="110" rx="12" fill="#edf4ee"/>
     <path d="M12 99 H168" stroke="#a9bfae" strokeWidth="2"/>
