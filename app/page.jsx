@@ -48,7 +48,7 @@ function ExercisePicture({name}) {
   if (panelIndex!==undefined && !photoUnavailable) {
     const col=panelIndex%2, row=Math.floor(panelIndex/2);
     return <div className="exercise-photo-crop" role="img" aria-label={name+' illustrated positioning guide'}>
-      <img src="/exercise-guide.png" loading="lazy" alt="" onError={()=>setPhotoUnavailable(true)}
+      <img src="/a_clean_infographic_style_collage_image_like_a_f.png" loading="lazy" alt="" onError={()=>setPhotoUnavailable(true)}
         style={{left:col===0?'0':'-100%',top:'-'+row*100+'%'}}/>
     </div>;
   }
