@@ -145,3 +145,80 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
  .routine-item .timer-actions button{min-width:0}
 }
 @media(max-width:360px){.routine-item .exercise-links{grid-template-columns:1fr}}
+
+/* ---------- One-tap workout flow ---------- */
+.big-start{width:100%;min-height:58px;font-size:17px;margin:6px 0 4px;border-radius:14px}
+button.secondary{background:#e7f0e5;color:#365f3f}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.chip{min-height:40px;padding:8px 14px;border-radius:999px;background:#f0f4ee;color:#365f3f;font-size:14px;font-weight:700;border:1px solid #dfe8dc}
+.chip.selected{background:#426e50;color:#fff;border-color:#426e50}
+.focus-chips{margin-top:14px}
+.workout-progress p{font-size:13px;margin:8px 0 12px}
+.exercise-list{list-style:none;margin:16px 0 8px;padding:0;display:grid;gap:8px}
+.exercise-row{display:flex;align-items:stretch;gap:6px}
+.exercise-open{flex:1;min-width:0;display:flex;align-items:center;gap:12px;text-align:left;background:#f6f8f3;color:#24342c;border:1px solid #e3eadf;border-radius:14px;padding:12px 14px;min-height:64px}
+.exercise-open:active{transform:scale(.99)}
+.exercise-status{flex-shrink:0;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#fff;border:2px solid #cddbcb;color:#426e50;font-size:13px;font-weight:800}
+.exercise-row.partial .exercise-status{border-color:#426e50}
+.exercise-row.complete .exercise-open{background:#eef5eb}
+.exercise-row.complete .exercise-status{background:#426e50;border-color:#426e50;color:#fff;font-size:17px}
+.exercise-row.complete strong{color:#5d7563}
+.exercise-text{min-width:0;display:flex;flex-direction:column}
+.exercise-text strong{font-size:15px;overflow-wrap:anywhere}
+.exercise-text span{font-size:12.5px;color:#65856e;font-weight:500}
+.carry-toggle{flex-shrink:0;width:46px;padding:0;background:transparent;color:#a3b5a6;border:1px solid #e3eadf;border-radius:14px;font-size:18px}
+.carry-toggle.on{background:#e7f0e5;color:#365f3f;border-color:#bcd2bb}
+.finish-box{display:grid;gap:8px;margin-top:18px;padding-top:16px;border-top:1px solid #edf0e9}
+.finish-box button:not(.chip){width:100%}
+.finish-box details summary,.manual-log summary{cursor:pointer;font-size:14px;font-weight:700;color:#426e50;padding:8px 0}
+.finish-box textarea{margin-top:6px}
+.manual-log{margin-top:14px;border-top:1px solid #edf0e9;padding-top:6px}
+.manual-log form{margin-top:10px}
+.player-hint{font-size:13px;color:#65756a;margin:6px 0}
+
+/* Full-screen exercise player */
+body.player-open{overflow:hidden}
+.player{position:fixed;inset:0;z-index:50;background:#f6f5ef;display:flex;flex-direction:column;height:100dvh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.player.phase-work{background:#eef5ea}
+.player.phase-rest{background:#f3f1ea}
+.player-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;font-size:13px;color:#5d6f63;font-weight:700;max-width:580px;width:100%;margin:0 auto}
+.player-close{background:#fff;color:#24342c;border:1px solid #e1e7dd;width:44px;height:44px;padding:0;border-radius:50%;font-size:17px}
+.player-est{min-width:44px;text-align:right}
+.player-body{flex:1;overflow-y:auto;padding:4px 20px 12px;max-width:580px;width:100%;margin:0 auto;display:flex;flex-direction:column;align-items:center;text-align:center}
+.player-body h2{font-size:clamp(24px,6.5vw,30px);margin:6px 0 2px;line-height:1.15}
+.player-dose{font-size:14px;margin:0 0 10px;color:#5d7563;font-weight:700}
+.player-body .exercise-photo-crop,.player-body .exercise-picture{max-width:340px;margin:8px auto}
+.player-body .exercise-photo-crop{aspect-ratio:1.5}
+.player-cue{font-size:15px;color:#3d5045;margin:10px 0 4px;max-width:420px}
+.set-dots{display:flex;gap:8px;justify-content:center;margin:4px 0 8px}
+.set-dots span{min-width:58px;padding:5px 10px;border-radius:999px;background:#e4ebe1;color:#6b7f70;font-size:12px;font-weight:800}
+.set-dots span.current{background:#fff;color:#2f5b3c;box-shadow:inset 0 0 0 2px #426e50}
+.set-dots span.done{background:#426e50;color:#fff}
+.timer-ring{position:relative;width:min(72vw,300px,42dvh);aspect-ratio:1;margin:14px auto 6px}
+.timer-ring svg{width:100%;height:100%;display:block}
+.ring-track{fill:none;stroke:#dfe7dc;stroke-width:12}
+.ring-fill{fill:none;stroke:#426e50;stroke-width:12;stroke-linecap:round;transition:stroke-dashoffset .25s linear}
+.phase-rest .ring-fill{stroke:#c49a5b}
+.phase-prep .ring-fill{stroke:#7fa489}
+.ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring-center strong{font-size:clamp(48px,15vw,72px);font-variant-numeric:tabular-nums;line-height:1.05;color:#24342c}
+.ring-label{font-size:15px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#4c6b55}
+.phase-rest .ring-label{color:#94703a}
+.ring-sub{font-size:13px;color:#6b7c70;margin-top:4px}
+.rep-target{margin:28px 0 8px;display:flex;flex-direction:column;align-items:center}
+.rep-target strong{font-size:clamp(84px,26vw,120px);line-height:1;color:#2f5b3c}
+.rep-target span{font-size:16px;font-weight:700;color:#5d7563}
+.complete-card{width:100%;display:flex;flex-direction:column;align-items:center}
+.complete-check{width:76px;height:76px;border-radius:50%;background:#426e50;color:#fff;display:grid;place-items:center;font-size:38px;margin:12px 0 6px}
+.complete-card h3{margin:4px 0}
+.complete-card .chip-row{justify-content:center}
+.finish-title{margin-top:18px!important}
+.up-next{width:100%;margin-top:18px;padding:14px 16px;background:#fff;border:1px solid #e1e9df;border-radius:14px;display:flex;flex-direction:column;gap:2px;text-align:left}
+.up-next strong{font-size:17px}
+.up-next span:last-child{font-size:13px;color:#65856e}
+.player-toast{margin:12px 0 0;background:#fbeee0;color:#7a4b16;padding:10px 14px;border-radius:12px;font-size:13px}
+.player-controls{padding:12px 16px 16px;max-width:580px;width:100%;margin:0 auto;display:grid;gap:8px}
+.player-controls .primary{width:100%;min-height:62px;font-size:18px;border-radius:16px}
+.control-row{display:flex;gap:8px}
+.control-row>*{flex:1}
+.player-controls .ghost{display:inline-flex;align-items:center;justify-content:center;min-height:52px;background:#fff;color:#365f3f;border:1px solid #dbe4d8;border-radius:14px;font-weight:700;font-size:15px;text-decoration:none;padding:10px}
