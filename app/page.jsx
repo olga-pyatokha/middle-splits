@@ -1,17 +1,115 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
+// rest = seconds of rest between sets. Time estimates are computed from sets, reps/holds and rest
+// (see estimateSeconds) instead of a hand-entered "minutes" number.
 const EXERCISES = [
-  { name: 'Quadruped rock-backs', sets: 2, reps: 8, hold_seconds: null, minutes: 2, focus: 'mobility', cue: 'Move gently through a comfortable range.' },
-  { name: 'Adductor rock-backs', sets: 2, reps: 8, hold_seconds: null, minutes: 3, focus: 'middle', cue: 'Extend one leg to the side; rock back without forcing range.' },
-  { name: 'Frog stretch', sets: 2, reps: null, hold_seconds: 30, minutes: 3, focus: 'middle', cue: 'Support your weight and stay in a comfortable stretch.' },
-  { name: 'Supported middle split hold', sets: 2, reps: null, hold_seconds: 20, minutes: 4, focus: 'middle', cue: 'Use blocks or hands for support; maintain control.' },
-  { name: 'Elevated pancake good mornings', sets: 2, reps: 8, hold_seconds: null, minutes: 4, focus: 'pancake', cue: 'Hinge from the hips; sit on a block if helpful.' },
-  { name: 'Seated pancake hold', sets: 2, reps: null, hold_seconds: 30, minutes: 3, focus: 'pancake', cue: 'Keep a comfortable forward hinge rather than rounding to reach farther.' },
-  { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, minutes: 3, focus: 'strength', cue: 'Use support, stop before cramping; note left/right differences.' },
-  { name: 'Wide-stance lateral weight shifts', sets: 2, reps: 6, hold_seconds: null, minutes: 4, focus: 'strength', cue: 'Move slowly and keep the range comfortable.' }
+  { name: 'Quadruped rock-backs', sets: 2, reps: 8, hold_seconds: null, rest: 15, focus: 'mobility', cue: 'Move gently through a comfortable range.' },
+  { name: 'Adductor rock-backs', sets: 2, reps: 8, hold_seconds: null, rest: 15, focus: 'middle', cue: 'Extend one leg to the side; rock back without forcing range.' },
+  { name: 'Frog stretch', sets: 2, reps: null, hold_seconds: 30, rest: 15, focus: 'middle', cue: 'Support your weight and stay in a comfortable stretch.' },
+  { name: 'Supported middle split hold', sets: 2, reps: null, hold_seconds: 20, rest: 20, focus: 'middle', cue: 'Use blocks or hands for support; maintain control.' },
+  { name: 'Elevated pancake good mornings', sets: 2, reps: 8, hold_seconds: null, rest: 20, focus: 'pancake', cue: 'Hinge from the hips; sit on a block if helpful.' },
+  { name: 'Seated pancake hold', sets: 2, reps: null, hold_seconds: 30, rest: 15, focus: 'pancake', cue: 'Keep a comfortable forward hinge rather than rounding to reach farther.' },
+  { name: 'Seated straddle compression lifts', sets: 2, reps: 5, hold_seconds: null, rest: 30, secPerRep: 5, focus: 'strength', cue: 'Use support, stop before cramping; note left/right differences.' },
+  { name: 'Wide-stance lateral weight shifts', sets: 2, reps: 6, hold_seconds: null, rest: 20, focus: 'strength', cue: 'Move slowly and keep the range comfortable.' }
 ];
+const SEC_PER_REP = 4;        // average pace for a controlled rep
+const PREP_SECONDS = 5;       // "get into position" countdown before the first hold
+const TRANSITION_SECONDS = 15; // moving between exercises
+const AUTO_NEXT_SECONDS = 8;  // pause on "exercise done" before the next one pops up
+function workSeconds(e) { return e.hold_seconds != null ? e.hold_seconds : (e.reps || 0) * (e.secPerRep || SEC_PER_REP); }
+function estimateSeconds(e) {
+  const prep = e.hold_seconds != null ? PREP_SECONDS : 0;
+  return prep + e.sets * workSeconds(e) + Math.max(0, e.sets - 1) * (e.rest || 0) + TRANSITION_SECONDS;
+}
+function fmtClock(sec) { const s = Math.max(0, Math.ceil(sec)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function fmtMinutes(sec) { const m = Math.round(sec / 30) / 2; return (m < 1 ? '<1' : String(m).replace('.5', '½')) + ' min'; }
+function doseLabel(e) { return e.sets + ' × ' + (e.hold_seconds != null ? e.hold_seconds + 's hold' : e.reps + ' reps'); }
+function dateKey(d) { return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); }
+
+// The schedule is a rotation that advances each time you finish a workout — not tied to weekdays.
+// Skip a day and the same workout is simply waiting for you next time.
+const ROTATION = ['middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
+const FOCUS_LABEL = { middle: 'Middle splits', pancake: 'Pancake', recovery: 'Recovery', mixed: 'Mixed' };
+const ROT_TAG = /^\[rot:(\d+)(?: m:(\d+))?\]\s*/; // e.g. "[rot:2 m:15]" = rotation step + planned minutes
+function sessionRot(s) { const m = s?.notes?.match(ROT_TAG); return m ? Number(m[1]) % ROTATION.length : null; }
+function sessionMinutes(s) { const m = s?.notes?.match(ROT_TAG); return m && m[2] ? m[2] : null; }
+function cleanNotes(n) { return (n || '').replace(ROT_TAG, ''); }
+function nextRotation(sessions) {
+  const done = sessions.filter(s => s.completed)
+    .sort((a, b) => (b.started_at || b.session_date).localeCompare(a.started_at || a.session_date));
+  const last = done.find(s => sessionRot(s) != null);
+  if (last) return (sessionRot(last) + 1) % ROTATION.length;
+  return done.length % ROTATION.length; // sessions from before the rotation existed
+}
+
+const MINUTE_OPTIONS = ['5', '15', '30'];
+function daysBetween(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
+function shortDay(key) { return new Date(key + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' }); }
+function stepMinutes(m, delta) { const i = MINUTE_OPTIONS.indexOf(m); return MINUTE_OPTIONS[Math.max(0, Math.min(MINUTE_OPTIONS.length - 1, i + delta))]; }
+// Picks today's workout from history: days since the last workout, what it was, and the recent streak.
+function planFromHistory(sessions, goalDays, goalMinutes, todayKey) {
+  const done = sessions.filter(s => s.completed);
+  const dates = [...new Set(done.map(s => s.session_date))].sort().reverse();
+  const perSession = Math.max(5, (goalMinutes || 60) / Math.max(1, goalDays || 3));
+  const baseMinutes = perSession >= 22 ? '30' : perSession >= 9 ? '15' : '5';
+  if (!dates.length) return { rot: 0, minutes: baseMinutes, reason: 'First workout: starting with middle splits.' };
+  const last = dates[0];
+  const daysSince = daysBetween(last, todayKey);
+  let streak = 1;
+  while (streak < dates.length && daysBetween(dates[streak], dates[streak - 1]) === 1) streak++;
+  const lastSession = done.filter(s => s.session_date === last).sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''))[0];
+  const lastRot = sessionRot(lastSession);
+  const lastLabel = lastRot != null ? FOCUS_LABEL[ROTATION[lastRot]] : 'workout';
+  const when = daysSince === 0 ? 'today' : daysSince === 1 ? 'yesterday' : daysSince + ' days ago (' + shortDay(last) + ')';
+  let rot = nextRotation(sessions), minutes = baseMinutes, why;
+  const isRecovery = r => ROTATION[r] === 'recovery';
+  if (daysSince <= 1 && streak >= 3 && !isRecovery(rot) && lastRot != null && !isRecovery(lastRot)) {
+    rot = ROTATION.indexOf('recovery');
+    why = streak + ' days in a row, so today is an easier recovery day.';
+  } else if (daysSince >= 8) {
+    rot = ROTATION.indexOf('mixed'); minutes = stepMinutes(baseMinutes, -1);
+    why = 'Welcome back! A shorter mixed session to ease back in.';
+  } else if (daysSince >= 2 && isRecovery(rot)) {
+    rot = (rot + 1) % ROTATION.length;
+    why = 'You’ve already rested, so the recovery day is skipped.';
+  } else if (daysSince >= 4) {
+    why = 'Picking up where you left off.';
+  } else {
+    why = 'Next in your rotation.';
+  }
+  return { rot, minutes, reason: 'Last: ' + lastLabel + ' ' + when + '. ' + why, daysSince };
+}
+
+let audioCtx = null;
+function unlockAudio() {
+  try {
+    if (!audioCtx) { const C = window.AudioContext || window.webkitAudioContext; if (C) audioCtx = new C(); }
+    audioCtx?.resume?.();
+  } catch {}
+}
+function beep(freq = 880, ms = 120, vol = 0.18) {
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime;
+    o.type = 'sine'; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    o.start(t); o.stop(t + ms / 1000 + 0.02);
+  } catch {}
+}
+function buzz(pattern) { try { navigator.vibrate?.(pattern); } catch {} }
+function useWakeLock(active) {
+  useEffect(() => {
+    if (!active || typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;
+    let lock = null, cancelled = false;
+    const request = async () => { try { lock = await navigator.wakeLock.request('screen'); if (cancelled) lock.release(); } catch {} };
+    request();
+    const onVisible = () => { if (document.visibilityState === 'visible') request(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); try { lock?.release()?.catch(() => {}); } catch {} };
+  }, [active]);
+}
 const EXERCISE_MEDIA = {
   'Quadruped rock-backs': { url: 'https://www.youtube.com/watch?v=ub7AzL_5IKo', label: 'Watch free YouTube demonstration', youtubeId: 'ub7AzL_5IKo' },
   'Adductor rock-backs': { url: 'https://www.youtube.com/results?search_query=adductor+rock+back+exercise+physical+therapy', label: 'Find free YouTube demonstrations' },
@@ -68,35 +166,177 @@ function exerciseSearchUrl(name, platform) {
     ? 'https://www.instagram.com/explore/search/keyword/?q=' + query
     : 'https://www.youtube.com/results?search_query=' + query;
 }
-const STARTER_PLAN = EXERCISES.slice(0, 3);
-const WEEK_FOCUS = ['recovery', 'middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
-const WEEK_LABELS = ['Sun · Recovery', 'Mon · Middle splits', 'Tue · Pancake', 'Wed · Recovery', 'Thu · Middle splits', 'Fri · Pancake', 'Sat · Mixed'];
-function buildWorkout(minutes, sessions, logs) {
-  const today = new Date();
-  const todayKey = [today.getFullYear(), String(today.getMonth()+1).padStart(2,'0'), String(today.getDate()).padStart(2,'0')].join('-');
-  // Once today's workout is complete, preview the following day's lesson instead of repeating today's focus.
-  const finishedToday = sessions.some(s => s.completed && s.session_date === todayKey);
-  const previewDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + (finishedToday ? 1 : 0));
-  const day = previewDate.getDay();
-  const previewKey = [previewDate.getFullYear(), String(previewDate.getMonth()+1).padStart(2,'0'), String(previewDate.getDate()).padStart(2,'0')].join('-');
-  const recentSessions = sessions.filter(s => s.completed && s.session_date < previewKey && (new Date(previewKey+'T12:00:00')-new Date(s.session_date+'T12:00:00'))/86400000 <= 2);
+
+function buildWorkout(minutes, focusIndex, sessions, logs, activeId) {
+  const focus = ROTATION[focusIndex];
+  const todayKey = dateKey(new Date());
+  const recentSessions = sessions.filter(s => s.completed && s.id !== activeId && (new Date(todayKey + 'T12:00:00') - new Date(s.session_date + 'T12:00:00')) / 86400000 <= 2);
   const recentNames = new Set(logs.filter(l => recentSessions.some(s => s.id === l.session_id)).map(l => l.exercise_name));
-  const focus = WEEK_FOCUS[day];
-  const order = focus === 'recovery' ? ['mobility','pancake'] :
-    focus === 'middle' ? ['mobility','middle','strength','pancake'] :
-    focus === 'pancake' ? ['mobility','pancake','strength','middle'] :
-    ['mobility','middle','pancake','strength'];
+  const order = focus === 'recovery' ? ['mobility', 'pancake'] :
+    focus === 'middle' ? ['mobility', 'middle', 'strength', 'pancake'] :
+    focus === 'pancake' ? ['mobility', 'pancake', 'strength', 'middle'] :
+    ['mobility', 'middle', 'pancake', 'strength'];
   const candidates = EXERCISES.filter(e => focus !== 'recovery' || e.focus === 'mobility' || e.name === 'Seated pancake hold')
-    .sort((a,b) => order.indexOf(a.focus)-order.indexOf(b.focus) || Number(recentNames.has(a.name))-Number(recentNames.has(b.name)));
-  // Avoid repeating recent demanding exercises when alternatives in the same category exist.
-  const selected = [], used = new Set();
-  let remaining = Number(minutes);
+    .sort((a, b) => order.indexOf(a.focus) - order.indexOf(b.focus) || Number(recentNames.has(a.name)) - Number(recentNames.has(b.name)));
+  const selected = [];
+  let remaining = Number(minutes) * 60;
   for (const e of candidates) {
-    if (used.has(e.name) || e.minutes > remaining) continue;
-    selected.push(e); used.add(e.name); remaining -= e.minutes;
+    const cost = estimateSeconds(e);
+    if (cost > remaining) continue;
+    selected.push(e); remaining -= cost;
   }
-  return { label: WEEK_LABELS[day], exercises: selected, estimated: Number(minutes)-remaining, previewDate: previewKey, isNextDay: finishedToday };
+  return { focus, label: FOCUS_LABEL[focus], exercises: selected };
 }
+
+function TimerRing({ leftMs, duration, label, sub }) {
+  const r = 88, c = 2 * Math.PI * r;
+  const frac = duration ? Math.min(1, Math.max(0, leftMs / duration)) : 0;
+  return <div className="timer-ring" role="timer" aria-label={label + ' ' + fmtClock(leftMs / 1000)}>
+    <svg viewBox="0 0 200 200" aria-hidden="true">
+      <circle cx="100" cy="100" r={r} className="ring-track" />
+      <circle cx="100" cy="100" r={r} className="ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - frac)} transform="rotate(-90 100 100)" />
+    </svg>
+    <div className="ring-center"><span className="ring-label">{label}</span><strong>{fmtClock(leftMs / 1000)}</strong>{sub && <span className="ring-sub">{sub}</span>}</div>
+  </div>;
+}
+
+// Full-screen guided player for one exercise: start → (get ready) → hold/reps → auto-logged set → rest → … → next exercise.
+function Player({ item, position, total, initialDone, next, message, finishing, onLogSet, onRate, onNext, onClose, onFinish }) {
+  const isHold = item.hold_seconds != null;
+  const [done, setDone] = useState(initialDone);
+  const [phase, setPhase] = useState(initialDone >= item.sets ? 'complete' : 'ready'); // ready | prep | work | rest | complete
+  const [endAt, setEndAt] = useState(null);
+  const [duration, setDuration] = useState(0);
+  const [pausedLeft, setPausedLeft] = useState(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [rating, setRating] = useState(null);
+  const [effort, setEffort] = useState(null);
+  const lastBeep = useRef(null);
+  useWakeLock(true);
+  useEffect(() => { document.body.classList.add('player-open'); return () => document.body.classList.remove('player-open'); }, []);
+
+  const running = endAt != null && pausedLeft == null;
+  useEffect(() => { if (!running) return; const id = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(id); }, [running]);
+  const leftMs = pausedLeft != null ? pausedLeft : endAt != null ? Math.max(0, endAt - now) : 0;
+
+  function countdown(nextPhase, seconds) {
+    const t = Date.now(), ms = seconds * 1000;
+    setPhase(nextPhase); setDuration(ms); setPausedLeft(null); setNow(t); setEndAt(t + ms); lastBeep.current = null;
+  }
+  function settle(nextPhase) { setEndAt(null); setPausedLeft(null); setPhase(nextPhase); }
+  function completeSet(heldSeconds) {
+    const setNo = done + 1;
+    setDone(setNo);
+    onLogSet(item, setNo, heldSeconds);
+    buzz([80, 60, 80]);
+    if (setNo >= item.sets) { beep(1046, 400); if (next) countdown('complete', AUTO_NEXT_SECONDS); else settle('complete'); }
+    else { beep(660, 220); countdown('rest', item.rest || 15); }
+  }
+  function beginWork() {
+    beep(988, 260); buzz(150);
+    if (isHold) countdown('work', item.hold_seconds); else settle('work');
+  }
+  function startSet() {
+    unlockAudio();
+    if (isHold && done === 0) countdown('prep', PREP_SECONDS); else beginWork();
+  }
+
+  useEffect(() => {
+    if (!running) return;
+    const secLeft = Math.ceil(leftMs / 1000);
+    if (leftMs > 0) {
+      if ((phase === 'prep' || phase === 'rest' || phase === 'work') && secLeft <= 3 && lastBeep.current !== secLeft) {
+        lastBeep.current = secLeft; beep(phase === 'work' ? 520 : 660, 90, phase === 'work' ? 0.08 : 0.15);
+      }
+      return;
+    }
+    if (phase === 'prep' || phase === 'rest') beginWork();
+    else if (phase === 'work') completeSet(item.hold_seconds);
+    else if (phase === 'complete') { setEndAt(null); onNext(); }
+  }, [now, running]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function togglePause() {
+    if (pausedLeft != null) { const t = Date.now(); setNow(t); setEndAt(t + pausedLeft); setPausedLeft(null); }
+    else setPausedLeft(Math.max(0, endAt - Date.now()));
+  }
+  function addRest(sec) {
+    setDuration(d => d + sec * 1000);
+    if (pausedLeft != null) setPausedLeft(p => p + sec * 1000); else setEndAt(e => e + sec * 1000);
+  }
+  function skipCountdown() { const t = Date.now(); setNow(t); setPausedLeft(null); setEndAt(t); }
+  function rate(value) { setRating(value); onRate(item, value); }
+
+  const media = EXERCISE_MEDIA[item.name];
+  const pauseButton = <button className="ghost" onClick={togglePause}>{pausedLeft != null ? '▶ Resume' : '❚❚ Pause'}</button>;
+  const nextUp = next && <div className="up-next"><span className="eyebrow">UP NEXT</span><strong>{next.name}</strong><span>{doseLabel(next)} · ~{fmtMinutes(estimateSeconds(next))}</span></div>;
+
+  return <div className={'player phase-' + phase} role="dialog" aria-modal="true" aria-label={item.name}>
+    <header className="player-top">
+      <button className="player-close" onClick={onClose} aria-label="Back to exercise list">✕</button>
+      <span>Exercise {position} of {total}</span>
+      <span className="player-est">~{fmtMinutes(estimateSeconds(item))}</span>
+    </header>
+    <div className="player-body">
+      <h2>{item.name}</h2>
+      <p className="player-dose">{doseLabel(item)}{item.sets > 1 ? ' · ' + (item.rest || 15) + 's rest between sets' : ''}</p>
+      <div className="set-dots" aria-label={done + ' of ' + item.sets + ' sets done'}>
+        {Array.from({ length: item.sets }, (_, i) => <span key={i} className={i < done ? 'done' : (i === done && phase !== 'complete' ? 'current' : '')}>{i < done ? '✓' : 'Set ' + (i + 1)}</span>)}
+      </div>
+
+      {phase === 'ready' && <>
+        <ExercisePicture name={item.name} />
+        <p className="player-cue">{item.cue}</p>
+        {isHold && <p className="player-hint">Tap start, then you get {PREP_SECONDS}s to get into position. Sets log themselves and rest starts automatically.</p>}
+        {!isHold && <p className="player-hint">Do your reps at your own pace, then tap done. Rest starts automatically.</p>}
+      </>}
+      {phase === 'prep' && <TimerRing leftMs={leftMs} duration={duration} label="Get into position" sub={'Set ' + (done + 1) + ' of ' + item.sets} />}
+      {phase === 'work' && isHold && <TimerRing leftMs={leftMs} duration={duration} label={pausedLeft != null ? 'Paused' : 'Hold'} sub={'Set ' + (done + 1) + ' of ' + item.sets} />}
+      {phase === 'work' && !isHold && <div className="rep-target"><strong>{item.reps}</strong><span>reps · set {done + 1} of {item.sets}</span><p className="player-cue">{item.cue}</p></div>}
+      {phase === 'rest' && <>
+        <TimerRing leftMs={leftMs} duration={duration} label={pausedLeft != null ? 'Paused' : 'Rest'} sub={'Next: set ' + (done + 1) + ' of ' + item.sets} />
+        <p className="player-hint">{isHold ? 'The next hold starts on its own when rest ends — listen for the beeps.' : 'Get ready for your next set.'}</p>
+      </>}
+      {phase === 'complete' && <div className="complete-card">
+        <div className="complete-check">✓</div>
+        <h3>{item.sets} sets logged</h3>
+        <p className="player-hint">How did it feel? (optional)</p>
+        <div className="chip-row">{[['Easy', 3], ['Good', 5], ['Hard', 8]].map(([label, value]) =>
+          <button key={label} className={'chip' + (rating === value ? ' selected' : '')} onClick={() => rate(value)}>{label}</button>)}</div>
+        {nextUp}
+        {!next && <>
+          <h3 className="finish-title">That was the last one 🎉</h3>
+          <p className="player-hint">Overall effort (optional)</p>
+          <div className="chip-row">{[['Light', 3], ['Moderate', 5], ['Tough', 8]].map(([label, value]) =>
+            <button key={label} className={'chip' + (effort === value ? ' selected' : '')} onClick={() => setEffort(effort === value ? null : value)}>{label}</button>)}</div>
+        </>}
+      </div>}
+      {message && <p className="player-toast" role="status">{message}</p>}
+    </div>
+
+    <footer className="player-controls">
+      {phase === 'ready' && <>
+        <button className="primary" onClick={startSet}>▶ Start {done > 0 ? 'set ' + (done + 1) : ''}</button>
+        <div className="control-row">
+          {media && <a className="ghost" href={media.url} target="_blank" rel="noopener noreferrer">Watch demo ↗</a>}
+          <button className="ghost" onClick={next ? onNext : onClose}>Skip exercise</button>
+        </div>
+      </>}
+      {phase === 'prep' && <div className="control-row">{pauseButton}<button className="ghost" onClick={skipCountdown}>Start hold now →</button></div>}
+      {phase === 'work' && isHold && <div className="control-row">{pauseButton}<button className="ghost" onClick={() => completeSet(Math.max(1, Math.round(item.hold_seconds - leftMs / 1000)))}>✓ Done early</button></div>}
+      {phase === 'work' && !isHold && <button className="primary" onClick={() => completeSet(null)}>✓ Done · log set {done + 1}</button>}
+      {phase === 'rest' && <div className="control-row">{pauseButton}<button className="ghost" onClick={() => addRest(15)}>+15s</button><button className="ghost" onClick={skipCountdown}>Skip rest →</button></div>}
+      {phase === 'complete' && next && <>
+        <button className="primary" onClick={onNext}>Next exercise {running ? '(' + Math.ceil(leftMs / 1000) + ')' : ''} →</button>
+        <div className="control-row">{running && <button className="ghost" onClick={() => settle('complete')}>Stay here</button>}<button className="ghost" onClick={onClose}>Back to list</button></div>
+      </>}
+      {phase === 'complete' && !next && <>
+        <button className="primary" disabled={finishing} onClick={() => onFinish(effort)}>{finishing ? 'Finishing…' : '✓ Finish workout'}</button>
+        <div className="control-row"><button className="ghost" onClick={onClose}>Back to list</button></div>
+      </>}
+    </footer>
+  </div>;
+}
+
 export default function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -106,11 +346,10 @@ export default function Home() {
   const [message, setMessage] = useState('');
   const [sessions, setSessions] = useState([]);
   const [notes, setNotes] = useState('');
-  const [effort, setEffort] = useState(5);
+  const [effort, setEffort] = useState(null);
   const [saving, setSaving] = useState(false);
   const [exerciseName, setExerciseName] = useState('Seated straddle compression lifts');
   const [side, setSide] = useState('both');
-  const [sets, setSets] = useState('2');
   const [reps, setReps] = useState('5');
   const [holdSeconds, setHoldSeconds] = useState('');
   const [difficulty, setDifficulty] = useState(5);
@@ -118,25 +357,27 @@ export default function Home() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [exerciseSaving, setExerciseSaving] = useState(false);
-  const [setIndex, setSetIndex] = useState(1);
-  const [setFeedback, setSetFeedback] = useState('');
-  const [loggedSetCounts, setLoggedSetCounts] = useState({});
-  const [setTarget, setSetTarget] = useState(2);
-  const [plan, setPlan] = useState(null);
-  const [planSaving, setPlanSaving] = useState(false);
-  const [workoutMinutes, setWorkoutMinutes] = useState('15');
-  const [guidedExercise, setGuidedExercise] = useState(null);
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerDuration, setTimerDuration] = useState(30);
-  const [completedReps, setCompletedReps] = useState(0);
-  const [completedSets, setCompletedSets] = useState(0);
+  const [minutesOverride, setMinutesOverride] = useState(null);
+  const [focusOverride, setFocusOverride] = useState(null);
+  const [showPlanOptions, setShowPlanOptions] = useState(false);
+  const [playerName, setPlayerName] = useState(null);
   const [measurements, setMeasurements] = useState([]);
   const [measurementValue, setMeasurementValue] = useState('');
   const [measurementMethod, setMeasurementMethod] = useState('Floor-to-pelvis gap');
   const [measurementWarmedUp, setMeasurementWarmedUp] = useState(true);
   const [measurementNotes, setMeasurementNotes] = useState('');
   const [measurementSaving, setMeasurementSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [screen, setScreen] = useState('home');
+  const [sessionStage, setSessionStage] = useState('exercises');
+  const [openDay, setOpenDay] = useState(null);
+  const [openHistory, setOpenHistory] = useState(null);
+  const [carry, setCarry] = useState([]);
+  const [goalDays, setGoalDays] = useState(3);
+  const [goalMinutes, setGoalMinutes] = useState(60);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -148,8 +389,9 @@ export default function Home() {
   useEffect(() => {
     if (!user || !supabase) { setSessions([]); setActiveSession(null); return; }
     let active = true;
-    supabase.from('sessions').select('id,session_date,effort,notes,completed,duration_minutes,started_at').order('session_date', { ascending: false }).limit(30)
-      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else { setSessions(data ?? []); setActiveSession((data ?? []).find(s=>s.completed===false) ?? null); } } });
+    supabase.from('sessions').select('id,session_date,effort,notes,completed,duration_minutes,started_at')
+      .order('session_date', { ascending: false }).order('started_at', { ascending: false, nullsFirst: false }).limit(30)
+      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else { setSessions(data ?? []); setActiveSession((data ?? []).find(s => s.completed === false) ?? null); } } });
     return () => { active = false; };
   }, [user]);
 
@@ -157,17 +399,8 @@ export default function Home() {
     if (!user || !supabase) { setExerciseLogs([]); return; }
     let active = true;
     supabase.from('exercise_logs').select('id,session_id,exercise_name,side,sets,reps,hold_seconds,difficulty,notes,created_at')
-      .order('created_at', { ascending: false }).limit(100)
-      .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setExerciseLogs(data ?? []); } });
-    return () => { active = false; };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user || !supabase) { setPlan(null); return; }
-    let active = true;
-    supabase.from('training_plans').select('id,title,version,plan,status').eq('status','active')
-      .order('created_at',{ascending:false}).limit(1)
-      .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setPlan(data?.[0] ?? null); } });
+      .order('created_at', { ascending: false }).limit(200)
+      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else setExerciseLogs(data ?? []); } });
     return () => { active = false; };
   }, [user]);
 
@@ -175,97 +408,107 @@ export default function Home() {
     if (!user || !supabase) { setMeasurements([]); return; }
     let active = true;
     supabase.from('measurements').select('id,measured_at,metric,value_cm,method,warmed_up,notes')
-      .eq('metric','middle_split_gap_cm').order('measured_at',{ascending:true}).limit(100)
-      .then(({data,error}) => { if (active) { if (error) setMessage(error.message); else setMeasurements(data ?? []); } });
+      .eq('metric', 'middle_split_gap_cm').order('measured_at', { ascending: true }).limit(100)
+      .then(({ data, error }) => { if (active) { if (error) setMessage(error.message); else setMeasurements(data ?? []); } });
     return () => { active = false; };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !supabase) { setPreferencesLoaded(false); return; }
+    let active = true;
+    async function loadPreferences() {
+      const { data, error } = await supabase.from('user_preferences').select('goal_days,goal_minutes,carry_exercises').eq('user_id', user.id).maybeSingle();
+      if (!active) return;
+      if (error) { setMessage('Could not load training preferences: ' + error.message); return; }
+      if (data) {
+        setGoalDays(data.goal_days); setGoalMinutes(data.goal_minutes);
+        setCarry(Array.isArray(data.carry_exercises) ? data.carry_exercises : []);
+      } else {
+        const key = 'splits:' + user.id + ':';
+        let days = 3, minutes = 60, items = [];
+        try {
+          days = Number(JSON.parse(localStorage.getItem(key + 'days') || '3'));
+          minutes = Number(JSON.parse(localStorage.getItem(key + 'minutes') || '60'));
+          items = JSON.parse(localStorage.getItem(key + 'carry') || '[]');
+        } catch {}
+        days = Math.max(1, Math.min(7, days || 3)); minutes = Math.max(5, Math.min(1000, minutes || 60));
+        if (!Array.isArray(items)) items = [];
+        const { error: saveError } = await supabase.from('user_preferences').upsert({ user_id: user.id, goal_days: days, goal_minutes: minutes, carry_exercises: items }, { onConflict: 'user_id' });
+        if (!active) return;
+        if (saveError) setMessage('Could not sync preferences: ' + saveError.message);
+        setGoalDays(days); setGoalMinutes(minutes); setCarry(items);
+      }
+      setPreferencesLoaded(true);
+    }
+    loadPreferences();
+    return () => { active = false; };
+  }, [user]);
+  useEffect(() => { if (!activeSession) return; const id = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(id); }, [activeSession]);
+
+  async function persist(k, v) {
+    if (!user || !supabase || !preferencesLoaded) return;
+    const column = { days: 'goal_days', minutes: 'goal_minutes', carry: 'carry_exercises' }[k];
+    if (!column) return;
+    const { error } = await supabase.from('user_preferences').update({ [column]: v, updated_at: new Date().toISOString() }).eq('user_id', user.id);
+    if (error) setMessage('Could not save preferences: ' + error.message);
+  }
+  function toggleCarry(name) { const next = carry.includes(name) ? carry.filter(n => n !== name) : [...carry, name]; setCarry(next); persist('carry', next); }
+  function elapsed(s) {
+    if (s.duration_minutes != null) return Number(s.duration_minutes);
+    if (!s.started_at) return null;
+    return s.completed ? null : Math.max(0, Math.round((clock - new Date(s.started_at).getTime()) / 60000));
+  }
 
   async function saveMeasurement(e) {
     e.preventDefault(); setMeasurementSaving(true); setMessage('');
     const value = Number(measurementValue);
-    if (!Number.isFinite(value) || value < 0 || measurementValue.trim()==='') {
+    if (!Number.isFinite(value) || value < 0 || measurementValue.trim() === '') {
       setMessage('Enter a valid non-negative measurement in centimeters.');
       setMeasurementSaving(false); return;
     }
-    const {data,error} = await supabase.from('measurements').insert({
-      user_id:user.id, measured_at:new Date().toISOString(), metric:'middle_split_gap_cm',
-      value_cm:value, method:measurementMethod, warmed_up:measurementWarmedUp, notes:measurementNotes.trim()
+    const { data, error } = await supabase.from('measurements').insert({
+      user_id: user.id, measured_at: new Date().toISOString(), metric: 'middle_split_gap_cm',
+      value_cm: value, method: measurementMethod, warmed_up: measurementWarmedUp, notes: measurementNotes.trim()
     }).select('id,measured_at,metric,value_cm,method,warmed_up,notes').single();
     if (error) setMessage(error.message);
-    else { setMeasurements(current=>[...current,data].sort((a,b)=>new Date(a.measured_at)-new Date(b.measured_at))); setMeasurementValue(''); setMeasurementNotes(''); setMessage('Measurement saved!'); if(sessionStage==='measurement'){setSessionStage('exercises');setScreen('home');} }
+    else { setMeasurements(current => [...current, data].sort((a, b) => new Date(a.measured_at) - new Date(b.measured_at))); setMeasurementValue(''); setMeasurementNotes(''); setMessage('Measurement saved!'); if (sessionStage === 'measurement') { setSessionStage('exercises'); setScreen('home'); } }
     setMeasurementSaving(false);
   }
 
-  async function createStarterPlan() {
-    setPlanSaving(true); setMessage('');
-    const {data,error} = await supabase.from('training_plans').insert({
-      user_id:user.id,title:'Middle Splits · Starter Routine',version:1,status:'active',
-      plan:{ exercises:STARTER_PLAN, note:'Starter template, not a personalized medical or training prescription. Adjust to comfort.' }
-    }).select('id,title,version,plan,status').single();
-    if (error) setMessage(error.message);
-    else {setPlan(data);setMessage('Starter routine saved!');}
-    setPlanSaving(false);
+  function setsDone(name) {
+    return activeSession ? exerciseLogs.filter(l => l.session_id === activeSession.id && l.exercise_name === name).length : 0;
   }
 
-  function prepareExercise(item) {
-    if (!activeSession) { setMessage('Start a session to log this exercise.'); document.getElementById('session-control')?.scrollIntoView({behavior:'smooth'}); return; }
-    setScreen('session');setSessionStage('exercises');setExerciseName(item.name); setSide('both'); setSets('1'); setSetTarget(item.sets);
-    const savedCount = exerciseLogs.filter(l=>l.session_id===activeSession.id && l.exercise_name===item.name && l.notes?.startsWith('[Set ')).length;
-    setSetIndex(savedCount+1); setLoggedSetCounts(v=>({...v,[item.name]:savedCount})); setSetFeedback('');
-    setReps(item.reps == null ? '' : String(item.reps));
-    setHoldSeconds(item.hold_seconds == null ? '' : String(item.hold_seconds));
-    setExerciseNotes(item.cue || '');
-    document.getElementById('exercise-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+  // One tap per set — no forms. Called by the player when a hold finishes or "Done" is tapped.
+  async function logSet(item, setNo, heldSeconds) {
+    if (!activeSession) return;
+    const { data, error } = await supabase.from('exercise_logs').insert({
+      user_id: user.id, session_id: activeSession.id, exercise_name: item.name, side: 'both', sets: 1,
+      reps: item.reps ?? null, hold_seconds: heldSeconds ?? item.hold_seconds ?? null, difficulty: null, notes: '[Set ' + setNo + ']'
+    }).select('id,session_id,exercise_name,side,sets,reps,hold_seconds,difficulty,notes,created_at').single();
+    if (error) setMessage('Set ' + setNo + ' did not save: ' + error.message);
+    else setExerciseLogs(current => [data, ...current]);
   }
-
-  function openGuide(item) {
-    if (guidedExercise?.name === item.name) { setGuidedExercise(null); setTimerRunning(false); return; }
-    setGuidedExercise(item);
-    setCompletedReps(0);
-    setCompletedSets(0);
-    const duration = item.hold_seconds || 30;
-    setTimerDuration(duration);
-    setSecondsLeft(duration);
-    setTimerRunning(false);
+  async function rateExercise(item, value) {
+    if (!activeSession) return;
+    const { error } = await supabase.from('exercise_logs').update({ difficulty: value })
+      .eq('session_id', activeSession.id).eq('exercise_name', item.name);
+    if (error) setMessage('Could not save rating: ' + error.message);
+    else setExerciseLogs(current => current.map(l => l.session_id === activeSession.id && l.exercise_name === item.name ? { ...l, difficulty: value } : l));
   }
-  function setGuideDuration(value) {
-    const duration = Math.max(1, Math.min(600, Number(value) || 1));
-    setTimerDuration(duration); setSecondsLeft(duration); setTimerRunning(false);
-  }
-  function recordRep() {
-    if (!guidedExercise) return;
-    const target = guidedExercise.reps || 1;
-    if (completedReps + 1 >= target) { setCompletedReps(0); setCompletedSets(v => Math.min(guidedExercise.sets, v + 1)); }
-    else setCompletedReps(v => v + 1);
-    setTimerRunning(false); setSecondsLeft(timerDuration);
-  }
-  useEffect(() => {
-    if (!timerRunning || secondsLeft <= 0) return;
-    const timer = setInterval(() => setSecondsLeft(value => Math.max(0, value - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [timerRunning, secondsLeft]);
-  useEffect(() => {
-    if (secondsLeft === 0) setTimerRunning(false);
-  }, [secondsLeft]);
 
   async function saveExercise(e) {
     e.preventDefault();
-    if (!activeSession) { setMessage('Start a workout session first.'); return; }
+    if (!activeSession) { setMessage('Start a workout first.'); return; }
     setExerciseSaving(true); setMessage('');
     const payload = { user_id: user.id, session_id: activeSession.id, exercise_name: exerciseName.trim(),
       side, sets: 1, reps: reps === '' ? null : Number(reps),
       hold_seconds: holdSeconds === '' ? null : Number(holdSeconds),
-      difficulty: Number(difficulty), notes: '[Set '+setIndex+'] '+[setFeedback.trim(),exerciseNotes.trim()].filter(Boolean).join(' · ') };
-    const {data,error} = await supabase.from('exercise_logs').insert(payload)
+      difficulty: Number(difficulty), notes: exerciseNotes.trim() };
+    const { data, error } = await supabase.from('exercise_logs').insert(payload)
       .select('id,session_id,exercise_name,side,sets,reps,hold_seconds,difficulty,notes,created_at').single();
     if (error) setMessage(error.message);
-    else {
-      setExerciseLogs(current => [data,...current]);
-      setLoggedSetCounts(current=>({...current,[exerciseName]:(current[exerciseName]||0)+1}));
-      setSetIndex(v=>v+1); setSetFeedback(''); setExerciseNotes('');
-      setMessage('Set '+setIndex+' saved!');
-      if(carry.includes(exerciseName))toggleCarry(exerciseName);
-    }
+    else { setExerciseLogs(current => [data, ...current]); setExerciseNotes(''); setMessage(exerciseName + ' logged.'); }
     setExerciseSaving(false);
   }
 
@@ -278,86 +521,48 @@ export default function Home() {
     else if (mode === 'signup' && !data.session) setMessage('Check your email to confirm your account, then sign in.');
   }
 
-  async function startWorkout() {
-    if (activeSession || saving) return;
+  async function startWorkout(openName) {
+    if (saving) return;
+    if (activeSession) { setScreen('session'); setSessionStage('exercises'); if (openName) { unlockAudio(); setPlayerName(openName); } return; }
+    unlockAudio();
     setSaving(true); setMessage('');
-    const date = new Date();
-    const localDate = [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
     const { data, error } = await supabase.from('sessions').insert({
-      user_id:user.id, session_date:localDate, plan_id:plan?.id ?? null,
-      started_at:new Date().toISOString(), completed:false
+      user_id: user.id, session_date: dateKey(new Date()), plan_id: null,
+      started_at: new Date().toISOString(), completed: false, notes: '[rot:' + plannedRotation + ' m:' + workoutMinutes + ']'
     }).select('id,session_date,effort,notes,completed,duration_minutes,started_at').single();
     if (error) setMessage(error.message);
-    else { setSessions(current=>[data,...current]); setActiveSession(data); setScreen('session');setSessionStage('exercises'); setMessage('Session started. Log your exercises below.'); }
+    else {
+      setSessions(current => [data, ...current]); setActiveSession(data); setFocusOverride(null); setMinutesOverride(null); setShowPlanOptions(false);
+      setScreen('session'); setSessionStage('exercises');
+      if (openName) setPlayerName(openName);
+      window.scrollTo?.({ top: 0 });
+    }
     setSaving(false);
   }
+  function openExercise(name) {
+    if (!activeSession) { startWorkout(name); return; }
+    unlockAudio(); setMessage(''); setPlayerName(name);
+  }
 
-  async function endWorkout(e) {
-    e.preventDefault();
+  async function finishWorkout(effortValue) {
     if (!activeSession || saving) return;
     setSaving(true); setMessage('');
-    const {data,error} = await supabase.from('sessions')
-      .update({effort:Number(effort),notes:notes.trim(),completed:true,duration_minutes:Math.max(0,Math.min(480,elapsed(activeSession) ?? 0))})
-      .eq('id',activeSession.id).eq('completed',false)
+    const tag = (activeSession.notes || '').match(ROT_TAG)?.[0]?.trim() || '';
+    const finalEffort = effortValue ?? effort;
+    const { data, error } = await supabase.from('sessions')
+      .update({ effort: finalEffort == null ? null : Number(finalEffort), notes: [tag, notes.trim()].filter(Boolean).join(' '), completed: true, duration_minutes: Math.max(0, Math.min(480, elapsed(activeSession) ?? 0)) })
+      .eq('id', activeSession.id).eq('completed', false)
       .select('id,session_date,effort,notes,completed,duration_minutes,started_at').single();
     if (error) setMessage(error.message);
-    else { setSessions(current=>current.map(s=>s.id===data.id?data:s)); setActiveSession(null); setNotes(''); setEffort(5); setSessionStage('measurement');setScreen('session');setMessage('Session completed. Add a measurement if you want, or finish.'); }
-    setSaving(false);
-  }
-
-  const [exporting, setExporting] = useState(false);
-  const [screen, setScreen] = useState('home');
-  const [sessionStage, setSessionStage] = useState('exercises');
-  const [openDay, setOpenDay] = useState(null);
-  const [openHistory, setOpenHistory] = useState(null);
-  const [carry, setCarry] = useState([]);
-  const [goalDays, setGoalDays] = useState(3);
-  const [goalMinutes, setGoalMinutes] = useState(60);
-  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  const [clock, setClock] = useState(Date.now());
-  useEffect(()=>{
-    if(!user || !supabase){setPreferencesLoaded(false);return;}
-    let active=true;
-    async function loadPreferences(){
-      const {data,error}=await supabase.from('user_preferences').select('goal_days,goal_minutes,carry_exercises').eq('user_id',user.id).maybeSingle();
-      if(!active)return;
-      if(error){setMessage('Could not load training preferences: '+error.message);return;}
-      if(data){
-        setGoalDays(data.goal_days);setGoalMinutes(data.goal_minutes);
-        setCarry(Array.isArray(data.carry_exercises)?data.carry_exercises:[]);
-      }else{
-        const key='splits:'+user.id+':';
-        let days=3,minutes=60,items=[];
-        try {
-          days=Number(JSON.parse(localStorage.getItem(key+'days')||'3'));
-          minutes=Number(JSON.parse(localStorage.getItem(key+'minutes')||'60'));
-          items=JSON.parse(localStorage.getItem(key+'carry')||'[]');
-        }catch{}
-        days=Math.max(1,Math.min(7,days||3));minutes=Math.max(5,Math.min(1000,minutes||60));
-        if(!Array.isArray(items))items=[];
-        const {error:saveError}=await supabase.from('user_preferences').upsert({user_id:user.id,goal_days:days,goal_minutes:minutes,carry_exercises:items},{onConflict:'user_id'});
-        if(!active)return;
-        if(saveError)setMessage('Could not sync preferences: '+saveError.message);
-        setGoalDays(days);setGoalMinutes(minutes);setCarry(items);
-      }
-      setPreferencesLoaded(true);
+    else {
+      const logged = new Set(exerciseLogs.filter(l => l.session_id === activeSession.id).map(l => l.exercise_name));
+      if (carry.some(n => logged.has(n))) { const next = carry.filter(n => !logged.has(n)); setCarry(next); persist('carry', next); }
+      setSessions(current => current.map(s => s.id === data.id ? data : s)); setActiveSession(null); setPlayerName(null);
+      setNotes(''); setEffort(null); setSessionStage('measurement'); setScreen('session');
+      setMessage('Workout complete. Add a measurement if you like, or skip.');
+      window.scrollTo?.({ top: 0 });
     }
-    loadPreferences();
-    return ()=>{active=false};
-  },[user]);
-  useEffect(()=>{if(!activeSession)return;const id=setInterval(()=>setClock(Date.now()),1000);return ()=>clearInterval(id)},[activeSession]);
-  async function persist(k,v){
-    if(!user || !supabase || !preferencesLoaded)return;
-    const column={days:'goal_days',minutes:'goal_minutes',carry:'carry_exercises'}[k];
-    if(!column)return;
-    const {error}=await supabase.from('user_preferences').update({[column]:v,updated_at:new Date().toISOString()}).eq('user_id',user.id);
-    if(error)setMessage('Could not save preferences: '+error.message);
-  }
-  function toggleCarry(name){const next=carry.includes(name)?carry.filter(n=>n!==name):[...carry,name];setCarry(next);persist('carry',next)}
-  function elapsed(s){
-    if(s.duration_minutes!=null)return Number(s.duration_minutes);
-    if(!s.started_at)return null;
-    return s.completed?null:Math.max(0,Math.round((clock-new Date(s.started_at).getTime())/60000));
+    setSaving(false);
   }
 
   async function exportTrainingHistory() {
@@ -377,16 +582,13 @@ export default function Home() {
         }
         history[table] = rows;
       }
-      const payload = { format: 'middle-splits-training-export', version: 1,
-        exported_at: new Date().toISOString(), history };
+      const payload = { format: 'middle-splits-training-export', version: 1, exported_at: new Date().toISOString(), history };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'middle-splits-training-' + new Date().toISOString().slice(0,10) + '.json';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      link.download = 'middle-splits-training-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setMessage('Training history exported. You can upload the JSON file to ChatGPT for a session review.');
     } catch (error) {
@@ -396,14 +598,51 @@ export default function Home() {
     }
   }
 
-  const suggestedWorkout = buildWorkout(workoutMinutes, sessions, exerciseLogs);
-  const workoutItems=[...carry.map(n=>EXERCISES.find(e=>e.name===n)).filter(Boolean),...suggestedWorkout.exercises.filter(e=>!carry.includes(e.name))];
-  const today=new Date(),monday=new Date(today.getFullYear(),today.getMonth(),today.getDate()-((today.getDay()+6)%7));
-  const mondayKey=[monday.getFullYear(),String(monday.getMonth()+1).padStart(2,'0'),String(monday.getDate()).padStart(2,'0')].join('-');
-  const weekSessions=sessions.filter(s=>s.completed&&s.session_date>=mondayKey);
-  const activeDays=new Set(weekSessions.map(s=>s.session_date)).size;
-  const weekMinutes=weekSessions.reduce((sum,s)=>sum+(elapsed(s)||0),0);
+  const todayKey = dateKey(new Date());
+  const doneToday = !activeSession && sessions.some(s => s.completed && s.session_date === todayKey);
+  // If today's workout is already done, plan the next one as if it were tomorrow.
+  const planDay = doneToday ? dateKey(new Date(Date.now() + 86400000)) : todayKey;
+  const autoPlan = planFromHistory(sessions.filter(s => s.id !== activeSession?.id), goalDays, goalMinutes, planDay);
+  const upcomingRotation = autoPlan.rot;
+  const plannedRotation = focusOverride ?? upcomingRotation;
+  const workoutRotation = activeSession ? (sessionRot(activeSession) ?? plannedRotation) : plannedRotation;
+  const workoutMinutes = (activeSession && sessionMinutes(activeSession)) || minutesOverride || autoPlan.minutes;
+  const customized = focusOverride != null || minutesOverride != null;
+  const suggestedWorkout = buildWorkout(workoutMinutes, workoutRotation, sessions, exerciseLogs, activeSession?.id);
+  const workoutItems = [...carry.map(n => EXERCISES.find(e => e.name === n)).filter(Boolean), ...suggestedWorkout.exercises.filter(e => !carry.includes(e.name))];
+  const workoutSeconds = workoutItems.reduce((sum, e) => sum + estimateSeconds(e), 0);
+  const isDone = item => setsDone(item.name) >= item.sets;
+  const doneCount = workoutItems.filter(isDone).length;
+  const remainingSeconds = workoutItems.filter(i => !isDone(i)).reduce((sum, e) => sum + estimateSeconds(e), 0);
+  const nextUndone = workoutItems.find(i => !isDone(i));
+  const playerIndex = workoutItems.findIndex(i => i.name === playerName);
+  const playerItem = playerName ? (workoutItems[playerIndex] || EXERCISES.find(e => e.name === playerName)) : null;
+  const playerNext = playerItem ? (workoutItems.slice(playerIndex + 1).find(i => !isDone(i)) || workoutItems.slice(0, Math.max(0, playerIndex)).find(i => !isDone(i)) || null) : null;
 
+  const today = new Date(), monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7));
+  const mondayKey = dateKey(monday);
+  const weekSessions = sessions.filter(s => s.completed && s.session_date >= mondayKey);
+  const activeDays = new Set(weekSessions.map(s => s.session_date)).size;
+  const weekMinutes = weekSessions.reduce((sum, s) => sum + (elapsed(s) || 0), 0);
+
+  const focusPicker = !activeSession && <div className="chip-row focus-chips" role="group" aria-label="Workout focus">
+    {['middle', 'pancake', 'mixed', 'recovery'].map(f => {
+      const idx = ROTATION[plannedRotation] === f ? plannedRotation : ROTATION.indexOf(f);
+      return <button key={f} className={'chip' + (ROTATION[plannedRotation] === f ? ' selected' : '')}
+        onClick={() => setFocusOverride(idx === upcomingRotation ? null : idx)}>{FOCUS_LABEL[f]}</button>;
+    })}
+  </div>;
+  const timePicker = !activeSession && <div className="chip-row" role="group" aria-label="Time available">
+    {[['5', 'Quick · 5'], ['15', 'Regular · 15'], ['30', 'Long · 30']].map(([v, label]) =>
+      <button key={v} className={'chip' + (workoutMinutes === v ? ' selected' : '')} onClick={() => setMinutesOverride(v === autoPlan.minutes ? null : v)}>{label} min</button>)}
+  </div>;
+
+  const planReason = !activeSession && <div className="plan-reason">
+    <p>{doneToday ? '✓ Done for today, nice work. This is what\u2019s planned for next time.' : customized ? 'Your pick for today.' : autoPlan.reason}</p>
+    <button className="link-button" onClick={() => setShowPlanOptions(v => !v)}>{showPlanOptions ? 'Hide options' : 'Change'}</button>
+    {customized && <button className="link-button" onClick={() => { setFocusOverride(null); setMinutesOverride(null); }}>Use suggested</button>}
+  </div>;
+  const planOptions = !activeSession && showPlanOptions && <div className="plan-options">{focusPicker}{timePicker}</div>;
 
   if (!supabase) return <main className="shell"><h1>Middle Splits</h1><p>Set your Supabase environment variables to connect the app.</p></main>;
   if (loading) return <main className="shell"><p>Loading…</p></main>;
@@ -411,122 +650,110 @@ export default function Home() {
   return <main className="shell">
     <header className="top"><div><span className="eyebrow">FLEXIBILITY JOURNAL</span><h1>Middle Splits <span>✳</span></h1><p>Small sessions. Steady progress.</p></div>{user && <button className="quiet" onClick={() => supabase.auth.signOut()}>Sign out</button>}</header>
     {!user ? <section className="panel"><h2>{mode === 'signin' ? 'Welcome back' : 'Create your account'}</h2><p>Sign in to keep your training history private.</p>
-      <form onSubmit={authenticate}><label>Email<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label>
-      <label>Password<input type="password" minLength={6} required autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} value={password} onChange={e=>setPassword(e.target.value)}/></label>
-      <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
-      <button className="link" onClick={()=>{setMode(mode==='signin'?'signup':'signin');setMessage('');}}>{mode==='signin'?'New here? Create an account':'Already registered? Sign in'}</button>
+      <form onSubmit={authenticate}><label>Email<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} /></label>
+        <label>Password<input type="password" minLength={6} required autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <button type="submit">{mode === 'signin' ? 'Sign in' : 'Sign up'}</button></form>
+      <button className="link" onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setMessage(''); }}>{mode === 'signin' ? 'New here? Create an account' : 'Already registered? Sign in'}</button>
     </section> : <>
-      <nav className="app-tabs" aria-label="App sections"><button className={screen==='home'?'selected':''} onClick={()=>setScreen('home')}>⌂ Home</button><button className={screen==='session'?'selected':''} onClick={()=>setScreen('session')}>▶ Workout</button><button className={screen==='history'?'selected':''} onClick={()=>setScreen('history')}>↗ Progress</button></nav>
-      {screen==='home' && <section className="panel dashboard-panel">
-        <span className="eyebrow">YOUR PROGRESS</span><h2>Training overview</h2>
-        <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length?Number(measurements[measurements.length-1].value_cm)+' cm':'—'}</strong><span>Latest split gap</span></div></div>
-        <h3>{suggestedWorkout.isNextDay?'Up next · Tomorrow':'Next session'}</h3><p>{suggestedWorkout.label} · {suggestedWorkout.previewDate} · About {suggestedWorkout.estimated} min</p>
-        <div className="next-preview">{workoutItems.length?workoutItems.map(item=><span key={item.name}>{item.name}</span>):<span>No exercises planned</span>}</div>
-        <button onClick={()=>{setScreen('session');setSessionStage('exercises')}}>{activeSession?'Continue session →':'View session →'}</button>
-      </section>}
-      {screen==='home' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR WEEK</span><h2>Weekly training</h2></div><span className="spark">✦</span></div>
-        <p>Tap a day to see what you've completed. Your goals and weekly progress live here, separate from the workout screen.</p>
-        <div className="week-overview">{WEEK_LABELS.map((label,i)=>{
-          const day=new Date(monday);day.setDate(day.getDate()+((i+6)%7));
-          const date=[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-');
-          const records=sessions.filter(s=>s.session_date===date);
-          return <div key={date}><button type="button" className="week-day day-toggle" aria-expanded={openDay===date} onClick={()=>setOpenDay(openDay===date?null:date)}>{label} {records.some(s=>s.completed)?'✓':''} {openDay===date?'↑':'↓'}</button>{openDay===date&&<div className="day-details"><strong>{date}</strong><p>{records.length?records.length+' session(s)':'No workout logged'}</p>{records.map(s=><p key={s.id}>{s.completed?'Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'}</p>)}</div>}</div>;
-        })}</div>
-        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{width:Math.min(100,activeDays/Math.max(1,goalDays)*100)+'%'}}/></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e=>{const n=Number(e.target.value);setGoalDays(n);persist('days',n)}}>{[1,2,3,4,5,6,7].map(n=><option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e=>{const n=Number(e.target.value);setGoalMinutes(n);persist('minutes',n)}}/></label></div><p className="routine-note">Completed workout days count toward your goal. Session durations now sync across devices; older durations may be unavailable.</p></div>
-      </section>}
-      {screen==='session' && <section className="panel" id="session-control"><div className="sectionhead"><div><span className="eyebrow">TODAY</span><h2>{activeSession?'Session in progress':'Ready to train?'}</h2></div><span className="spark">↗</span></div>
-      {!activeSession ? <><p>Start a session, then log as many exercises as you like. Your workout stays active if you refresh or close the page.</p>
-        <button disabled={saving} onClick={startWorkout}>{saving?'Starting…':'Start session'}</button></> :
-        <><p className="active-indicator">● Active workout · {activeSession.session_date}</p>
-        <p>Active time: {elapsed(activeSession)===null?'Not tracked on this device':elapsed(activeSession)+' min'}. Log exercises below, then finish your session.</p>
-        <button className="quiet" onClick={()=>setSessionStage('measurement')}>Measure now (optional) →</button><form onSubmit={endWorkout}><label>Overall effort <strong>{effort}/10</strong><input type="range" min="1" max="10" value={effort} onChange={e=>setEffort(e.target.value)}/></label>
-        <label>Session notes<textarea rows="3" placeholder="How did it feel overall?" value={notes} onChange={e=>setNotes(e.target.value)}/></label>
-        <button disabled={saving} type="submit">{saving?'Finishing…':'End session'}</button></form></>}
-      </section>}
-      {screen==='session' && sessionStage==='exercises' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">WORKOUT</span><h2>Session exercises</h2></div><span className="spark">✦</span></div>
-        <p>Open an exercise for guidance and log each set while your session is active.</p>
-        <label>Time available
-          <select value={workoutMinutes} onChange={e=>setWorkoutMinutes(e.target.value)}>
-            <option value="5">5 minutes · Quick</option><option value="15">15 minutes · Regular</option><option value="30">30 minutes · Extended</option>
-          </select>
-        </label>
-        <h3>{suggestedWorkout.label} · {suggestedWorkout.previewDate} · About {suggestedWorkout.estimated} min</h3><p className="routine-note">Open an exercise to see guidance and timing. Log sets after starting the session.</p>
-        <div className="routine">{workoutItems.map(item=>
-          <article className="routine-item" key={item.name}><ExercisePicture name={item.name}/><div><strong>{item.name}</strong>
-            <span>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s'} · ~{item.minutes} min</span><p>{item.cue}</p></div>
-            <div className="routine-actions"><button className="routine-button" aria-expanded={guidedExercise?.name===item.name} onClick={()=>openGuide(item)}>{guidedExercise?.name===item.name?'Close exercise ↑':'Open exercise ↓'}</button><button className="quiet" onClick={()=>toggleCarry(item.name)}>{carry.includes(item.name)?'✓ Carried over':'↪ Do next time'}</button></div>
-          {guidedExercise?.name===item.name && <div className="guide-panel">
-            <p>{item.cue}</p>
-            <p><strong>{item.sets} sets {item.reps != null ? '× '+item.reps+' reps' : '× '+item.hold_seconds+'s holds'}</strong> · ~{item.minutes} min including rest</p>
-            {EXERCISE_MEDIA[item.name] && <div className="exercise-media">
-              {EXERCISE_MEDIA[item.name].youtubeId && <a href={EXERCISE_MEDIA[item.name].url} target="_blank" rel="noopener noreferrer"><img loading="lazy" alt={'Video preview for '+item.name} src={'https://img.youtube.com/vi/'+EXERCISE_MEDIA[item.name].youtubeId+'/hqdefault.jpg'}/></a>}
-              <a href={EXERCISE_MEDIA[item.name].url} target="_blank" rel="noopener noreferrer">{EXERCISE_MEDIA[item.name].label} ↗</a>
-            </div>}
-            <div className="exercise-links">
-              <a href={exerciseSearchUrl(item.name,'youtube')} target="_blank" rel="noopener noreferrer">YouTube demos ↗</a>
-              <a href={exerciseSearchUrl(item.name,'instagram')} target="_blank" rel="noopener noreferrer">Instagram demos ↗</a>
-            </div>
-            {item.reps == null && <label>Hold timer (seconds)
-              <input type="number" min="1" max="600" value={timerDuration} onChange={e=>setGuideDuration(e.target.value)}/>
-            </label>}
-            {item.reps == null && <div className="timer-display" role="timer" aria-live="off">{String(Math.floor(secondsLeft/60)).padStart(2,'0')}:{String(secondsLeft%60).padStart(2,'0')}</div>}
-            {item.reps == null && <div className="timer-actions">
-              <button onClick={()=>{if(secondsLeft===0)setSecondsLeft(timerDuration);setTimerRunning(v=>!v)}}>{timerRunning?'Pause':'Start timer'}</button>
-              <button className="routine-button" onClick={()=>{setTimerRunning(false);setSecondsLeft(timerDuration)}}>Reset timer</button>
-            </div>}
-            <div className="rep-progress"><strong>{completedSets} / {item.sets} sets complete</strong><span>{item.reps != null ? completedReps+' / '+item.reps+' reps in current set' : 'Tap after each hold'}</span></div>
-            <div className="timer-actions">
-              <button onClick={recordRep} disabled={completedSets>=item.sets}>✓ {item.reps != null?'Log rep':'Log hold'}</button>
-              <button className="routine-button" onClick={()=>{setCompletedReps(0);setCompletedSets(0);setTimerRunning(false);setSecondsLeft(timerDuration)}}>Reset count</button>
-            </div>
-            <p className="routine-note">{item.reps != null?'Count reps at your own pace. No per-rep timer.':'Use the timer for your hold.'} Stop if you feel pain or cramping. Save each set below.</p>
-            <button onClick={()=>{prepareExercise(item);setReps(item.reps==null?'':String(item.reps));}}>Log a set ↓</button>
-          </div>}
-          </article>)}</div>
-        <p className="routine-note">Suggestions adjust to the day and recent exercise history. You can still log any exercise below. Your session notes and effort feedback stay unchanged.</p>
-      </section>}
-      {screen==='session' && sessionStage==='exercises' && activeSession && <section className="panel" id="exercise-form"><div className="sectionhead"><div><span className="eyebrow">DETAILS</span><h2>Log an exercise</h2></div><span className="spark">✳</span></div>
-      <p>{activeSession ? 'Exercises automatically save to your active session.' : 'Start a session above to log exercises.'}</p>
-      <form onSubmit={saveExercise}>
+      <nav className="app-tabs" aria-label="App sections"><button className={screen === 'home' ? 'selected' : ''} onClick={() => setScreen('home')}>⌂ Home</button><button className={screen === 'session' ? 'selected' : ''} onClick={() => setScreen('session')}>▶ Workout</button><button className={screen === 'history' ? 'selected' : ''} onClick={() => setScreen('history')}>↗ Progress</button></nav>
 
-        <label>Exercise<select value={exerciseName} onChange={e=>{setExerciseName(e.target.value);setSetIndex(1);setSetFeedback('');setLoggedSetCounts(v=>({...v,[e.target.value]:exerciseLogs.filter(l=>l.session_id===activeSession?.id&&l.exercise_name===e.target.value&&l.notes?.startsWith('[Set ')).length}));}}>
-          {[...EXERCISES.map(e=>e.name),'Other'].map(name=><option key={name} value={name}>{name}</option>)}
-        </select></label>
-        {exerciseName==='Other' && <p>Use the notes field to specify the exercise.</p>}
-        <label>Side<select value={side} onChange={e=>setSide(e.target.value)}><option value="both">Both / center</option><option value="left">Left</option><option value="right">Right</option></select></label>
-        <div className="set-counter"><strong>Set {setIndex} of {setTarget}</strong><span>{exerciseLogs.filter(l=>l.session_id===activeSession?.id&&l.exercise_name===exerciseName&&l.notes?.startsWith('[Set ')).length} saved this session</span></div>
-        <div className="fields"><label>Sets<input type="number" min="1" max="100" value="1" disabled readOnly/></label>
-        <label>Reps<input type="number" min="0" max="1000" value={reps} onChange={e=>setReps(e.target.value)}/></label>
-        <label>Hold (seconds)<input type="number" min="0" step="0.5" value={holdSeconds} onChange={e=>setHoldSeconds(e.target.value)}/></label></div>
-        <label>Difficulty <strong>{difficulty}/10</strong><input type="range" min="1" max="10" value={difficulty} onChange={e=>setDifficulty(e.target.value)}/></label>
-        <label>How did this set feel?<textarea rows="2" placeholder="Range, control, cramping, left/right difference…" value={setFeedback} onChange={e=>setSetFeedback(e.target.value)}/></label>
-        <label>Additional exercise notes<textarea rows="2" placeholder="Optional notes…" value={exerciseNotes} onChange={e=>setExerciseNotes(e.target.value)}/></label>
-        <button disabled={exerciseSaving || !activeSession} type="submit">{exerciseSaving?'Saving…':'✓ Save set '+setIndex}</button>
-        <p className="routine-note">Each tap saves one set separately, with its own reps, hold duration, difficulty and feedback. You can adjust the next set before saving.</p>
-      </form></section>}
-      {screen==='session' && sessionStage==='measurement' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
+      {screen === 'home' && <section className="panel dashboard-panel">
+        <span className="eyebrow">{activeSession ? 'IN PROGRESS' : doneToday ? 'NEXT TIME' : 'TODAY\u2019S PLAN'}</span>
+        <h2>{suggestedWorkout.label}</h2>
+        <p>{workoutItems.length} exercises · about {fmtMinutes(activeSession ? remainingSeconds : workoutSeconds)}{activeSession ? ' left' : ''}</p>
+        {planReason}{planOptions}
+        <button className={'big-start' + (doneToday ? ' secondary' : '')} disabled={saving} onClick={() => startWorkout()}>{saving ? 'Starting…' : activeSession ? '▶ Continue workout' : doneToday ? '▶ Train again anyway' : '▶ Start workout'}</button>
+        <p className="routine-note">Planned from your history, not the calendar. After this: {[1, 2, 3].map(i => FOCUS_LABEL[ROTATION[(workoutRotation + i) % ROTATION.length]]).join(' → ')}.</p>
+        <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length ? Number(measurements[measurements.length - 1].value_cm) + ' cm' : '—'}</strong><span>Latest split gap</span></div></div>
+      </section>}
+
+      {screen === 'home' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">YOUR WEEK</span><h2>This week</h2></div><span className="spark">✦</span></div>
+        <div className="week-overview">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((label, i) => {
+          const day = new Date(monday); day.setDate(day.getDate() + i);
+          const date = dateKey(day);
+          const records = sessions.filter(s => s.session_date === date);
+          const doneRecords = records.filter(s => s.completed);
+          const focusNames = [...new Set(doneRecords.map(s => sessionRot(s)).filter(r => r != null).map(r => FOCUS_LABEL[ROTATION[r]]))];
+          return <div key={date}><button type="button" className={'week-day day-toggle' + (date === dateKey(today) ? ' current' : '')} aria-expanded={openDay === date} onClick={() => setOpenDay(openDay === date ? null : date)}>
+            {label} {doneRecords.length ? '✓ ' + (focusNames.join(', ') || 'Workout') : ''}</button>
+            {openDay === date && <div className="day-details"><strong>{date}</strong><p>{records.length ? records.length + ' session(s)' : 'No workout logged'}</p>{records.map(s => <p key={s.id}>{s.completed ? 'Completed' : 'In progress'} · {exerciseLogs.filter(l => l.session_id === s.id).length} sets · {elapsed(s) === null ? 'Time unavailable' : elapsed(s) + ' min'}</p>)}</div>}</div>;
+        })}</div>
+        <div className="goal-progress"><h3>Weekly activity goals</h3><p><strong>{activeDays}/{goalDays} active days</strong> · {weekMinutes}/{goalMinutes} tracked minutes</p><div className="goal-meter"><span style={{ width: Math.min(100, activeDays / Math.max(1, goalDays) * 100) + '%' }} /></div><div className="goal-settings"><label>Days/week<select value={goalDays} onChange={e => { const n = Number(e.target.value); setGoalDays(n); persist('days', n); }}>{[1, 2, 3, 4, 5, 6, 7].map(n => <option key={n}>{n}</option>)}</select></label><label>Minutes/week<input type="number" min="5" max="1000" value={goalMinutes} onChange={e => { const n = Number(e.target.value); setGoalMinutes(n); persist('minutes', n); }} /></label></div></div>
+      </section>}
+
+      {screen === 'session' && sessionStage === 'exercises' && <section className="panel workout-panel">
+        <div className="sectionhead"><div><span className="eyebrow">{activeSession ? '● IN PROGRESS' : 'TODAY'}</span><h2>{suggestedWorkout.label}</h2></div>
+          {activeSession && <span className="count">{elapsed(activeSession) ?? 0} min</span>}</div>
+        {activeSession ? <>
+          <div className="workout-progress"><div className="goal-meter"><span style={{ width: (workoutItems.length ? doneCount / workoutItems.length * 100 : 0) + '%' }} /></div>
+            <p>{doneCount} of {workoutItems.length} done · ~{fmtMinutes(remainingSeconds)} left</p></div>
+          {nextUndone && <button className="big-start" onClick={() => openExercise(nextUndone.name)}>▶ {doneCount ? 'Continue' : 'Start'}: {nextUndone.name}</button>}
+        </> : <>
+          <p>{workoutItems.length} exercises · about {fmtMinutes(workoutSeconds)}. Tap Start, or tap any exercise to jump straight in.</p>
+          {planReason}{planOptions}
+          <button className="big-start" disabled={saving} onClick={() => startWorkout()}>{saving ? 'Starting…' : '▶ Start workout'}</button>
+        </>}
+
+        <ol className="exercise-list">{workoutItems.map(item => {
+          const n = setsDone(item.name), complete = n >= item.sets;
+          return <li key={item.name} className={'exercise-row' + (complete ? ' complete' : '') + (n > 0 && !complete ? ' partial' : '')}>
+            <button className="exercise-open" onClick={() => openExercise(item.name)}>
+              <span className="exercise-status" aria-hidden="true">{complete ? '✓' : n > 0 ? n + '/' + item.sets : '▶'}</span>
+              <span className="exercise-text"><strong>{item.name}</strong><span>{doseLabel(item)} · ~{fmtMinutes(estimateSeconds(item))}</span></span>
+            </button>
+            <button className={'carry-toggle' + (carry.includes(item.name) ? ' on' : '')} title={carry.includes(item.name) ? 'Pinned to next workout' : 'Pin to next workout'} aria-label={(carry.includes(item.name) ? 'Unpin ' : 'Pin to next workout: ') + item.name} onClick={() => toggleCarry(item.name)}>↪</button>
+          </li>;
+        })}</ol>
+
+        {activeSession && <div className="finish-box">
+          <p className="player-hint">Overall effort (optional)</p>
+          <div className="chip-row">{[['Light', 3], ['Moderate', 5], ['Tough', 8]].map(([label, value]) =>
+            <button key={label} className={'chip' + (effort === value ? ' selected' : '')} onClick={() => setEffort(effort === value ? null : value)}>{label}</button>)}</div>
+          <details><summary>Add a note</summary><textarea rows="2" placeholder="How did it feel overall?" value={notes} onChange={e => setNotes(e.target.value)} /></details>
+          <button className={doneCount === workoutItems.length ? '' : 'secondary'} disabled={saving} onClick={() => finishWorkout()}>{saving ? 'Finishing…' : '✓ Finish workout'}</button>
+          <button className="quiet" onClick={() => setSessionStage('measurement')}>Measure now (optional) →</button>
+        </div>}
+
+        {activeSession && <details className="manual-log"><summary>Log something else</summary>
+          <form onSubmit={saveExercise}>
+            <label>Exercise<select value={exerciseName} onChange={e => setExerciseName(e.target.value)}>
+              {[...EXERCISES.map(e => e.name), 'Other'].map(name => <option key={name} value={name}>{name}</option>)}
+            </select></label>
+            {exerciseName === 'Other' && <p>Use the notes field to name the exercise.</p>}
+            <label>Side<select value={side} onChange={e => setSide(e.target.value)}><option value="both">Both / center</option><option value="left">Left</option><option value="right">Right</option></select></label>
+            <div className="fields"><label>Reps<input type="number" min="0" max="1000" value={reps} onChange={e => setReps(e.target.value)} /></label>
+              <label>Hold (s)<input type="number" min="0" step="0.5" value={holdSeconds} onChange={e => setHoldSeconds(e.target.value)} /></label></div>
+            <label>Difficulty <strong>{difficulty}/10</strong><input type="range" min="1" max="10" value={difficulty} onChange={e => setDifficulty(e.target.value)} /></label>
+            <label>Notes<textarea rows="2" placeholder="Optional…" value={exerciseNotes} onChange={e => setExerciseNotes(e.target.value)} /></label>
+            <button disabled={exerciseSaving} type="submit">{exerciseSaving ? 'Saving…' : '✓ Log set'}</button>
+          </form>
+        </details>}
+        <p className="routine-note">Times include rest between sets. ↪ pins an exercise to your next workout. Stop if you feel pain or cramping.</p>
+      </section>}
+
+      {screen === 'session' && sessionStage === 'measurement' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">PROGRESS</span><h2>Middle-splits measurements</h2></div><span className="spark">↘</span></div>
         <p>Optional end-of-session measurement. Measure the vertical gap from the floor to your pelvis in centimeters, using the same position and setup each time.</p>
-        <button className="quiet" onClick={()=>{setSessionStage('exercises');setScreen('home')}}>Skip measurement · Back to overview →</button>
+        <button className="quiet" onClick={() => { setSessionStage('exercises'); setScreen('home'); }}>Skip measurement · Back to overview →</button>
         <form onSubmit={saveMeasurement}>
-          <label>Gap to floor (cm)<input type="number" min="0" step="0.1" required placeholder="e.g. 25.5" value={measurementValue} onChange={e=>setMeasurementValue(e.target.value)}/></label>
-          <label>Method<select value={measurementMethod} onChange={e=>setMeasurementMethod(e.target.value)}>
+          <label>Gap to floor (cm)<input type="number" min="0" step="0.1" required placeholder="e.g. 25.5" value={measurementValue} onChange={e => setMeasurementValue(e.target.value)} /></label>
+          <label>Method<select value={measurementMethod} onChange={e => setMeasurementMethod(e.target.value)}>
             <option>Floor-to-pelvis gap</option><option>Block-supported floor-to-pelvis gap</option>
           </select></label>
-          <label className="checkline"><input type="checkbox" checked={measurementWarmedUp} onChange={e=>setMeasurementWarmedUp(e.target.checked)}/> Measured after warming up</label>
-          <label>Notes<textarea rows="2" placeholder="Position, blocks, discomfort, setup…" value={measurementNotes} onChange={e=>setMeasurementNotes(e.target.value)}/></label>
-          <button disabled={measurementSaving} type="submit">{measurementSaving?'Saving…':'Save measurement'}</button>
+          <label className="checkline"><input type="checkbox" checked={measurementWarmedUp} onChange={e => setMeasurementWarmedUp(e.target.checked)} /> Measured after warming up</label>
+          <label>Notes<textarea rows="2" placeholder="Position, blocks, discomfort, setup…" value={measurementNotes} onChange={e => setMeasurementNotes(e.target.value)} /></label>
+          <button disabled={measurementSaving} type="submit">{measurementSaving ? 'Saving…' : 'Save measurement'}</button>
         </form>
         {measurements.length > 0 && <div className="measure-history">
           <h3>Progress history</h3>
           {measurements.length > 1 && <div className="chart-scroll"><svg viewBox="0 0 320 150" role="img" aria-label="Middle splits floor gap over time" className="progress-chart">
             {(() => {
-              const vals=measurements.map(m=>Number(m.value_cm));
-              const low=Math.min(...vals), high=Math.max(...vals), span=Math.max(1,high-low);
-              const pts=vals.map((v,i)=>[20+i*280/Math.max(1,vals.length-1),15+(high-v)/span*110]);
-              return <><line x1="20" y1="125" x2="300" y2="125" stroke="#cad8cb"/><polyline points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#426e50" strokeWidth="3" strokeLinejoin="round"/>{pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r="4" fill="#426e50"/>)}</>;
+              const vals = measurements.map(m => Number(m.value_cm));
+              const low = Math.min(...vals), high = Math.max(...vals), span = Math.max(1, high - low);
+              const pts = vals.map((v, i) => [20 + i * 280 / Math.max(1, vals.length - 1), 15 + (high - v) / span * 110]);
+              return <><line x1="20" y1="125" x2="300" y2="125" stroke="#cad8cb" /><polyline points={pts.map(p => p.join(',')).join(' ')} fill="none" stroke="#426e50" strokeWidth="3" strokeLinejoin="round" />{pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="4" fill="#426e50" />)}</>;
             })()}
           </svg></div>}
-          <div className="history">{[...measurements].reverse().slice(0,8).map(m=><article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up?'Warmed up':'Not warmed up'}{m.notes?' · '+m.notes:''}</p></article>)}</div>
+          <div className="history">{[...measurements].reverse().slice(0, 8).map(m => <article key={m.id} className="entry"><div><strong>{Number(m.value_cm)} cm</strong><span>{new Date(m.measured_at).toLocaleDateString()}</span></div><p>{m.method} · {m.warmed_up ? 'Warmed up' : 'Not warmed up'}{m.notes ? ' · ' + m.notes : ''}</p></article>)}</div>
         </div>}
       </section>}
       {screen==='history' && <section className="panel progress-screen">
@@ -566,7 +793,7 @@ export default function Home() {
         })()}
       </section>}
       {screen==='history' && <section className="panel"><div className="sectionhead"><div><span className="eyebrow">TRAINING LOG</span><h2>Session history</h2></div><span className="count">{sessions.length}</span></div>
-      {sessions.length===0?<p>No workouts yet. Log your first session above.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} exercises · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{s.notes || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''} · difficulty {log.difficulty}/10</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
+      {sessions.length===0?<p>No workouts yet. Start your first one from the Workout tab.</p>:<div className="history">{sessions.map(s=><article key={s.id} className="entry"><button type="button" className="history-toggle" aria-expanded={openHistory===s.id} onClick={()=>setOpenHistory(openHistory===s.id?null:s.id)}><strong>{s.session_date}{sessionRot(s)!=null ? ' · '+FOCUS_LABEL[ROTATION[sessionRot(s)]] : ''}</strong><span>{s.completed?'✓ Completed':'In progress'} · {exerciseLogs.filter(l=>l.session_id===s.id).length} sets · {elapsed(s)===null?'Time unavailable':elapsed(s)+' min'} {openHistory===s.id?'↑':'↓'}</span></button>{openHistory===s.id&&<div className="history-details"><div><strong>{s.session_date}</strong><span>{s.completed ? `Effort ${s.effort ?? '—'}/10` : 'In progress'}</span></div><p>{cleanNotes(s.notes) || (s.completed ? 'Workout completed' : 'Workout in progress')}</p>{exerciseLogs.filter(log=>log.session_id===s.id).map(log=><div className="exercise-entry" key={log.id}><strong>{log.exercise_name}</strong><span>{log.side} · {log.sets} sets{log.reps!=null ? ` × ${log.reps} reps` : ''}{log.hold_seconds!=null ? ` · ${log.hold_seconds}s` : ''}{log.difficulty!=null ? ` · difficulty ${log.difficulty}/10` : ''}</span>{log.notes && <p>{log.notes}</p>}</div>)}</div>}</article>)}</div>}
       <div className="export-history">
         <h3>Share your training history</h3>
         <p>Download your sessions, exercise feedback, measurements and plans as a JSON file to upload to ChatGPT. Your data stays private until you choose to share the file.</p>
@@ -575,8 +802,14 @@ export default function Home() {
         </button>
       </div>
       </section>}
+      {playerItem && activeSession && <Player key={playerItem.name} item={playerItem}
+        position={playerIndex >= 0 ? playerIndex + 1 : workoutItems.length + 1} total={Math.max(workoutItems.length, playerIndex + 1)}
+        initialDone={setsDone(playerItem.name)} next={playerNext} message={message} finishing={saving}
+        onLogSet={logSet} onRate={rateExercise}
+        onNext={() => { setMessage(''); setPlayerName(playerNext ? playerNext.name : null); }}
+        onClose={() => setPlayerName(null)} onFinish={finishWorkout} />}
     </>}
-    {message && <p role="status" className="status">{message}</p>}
+    {message && !playerItem && <p role="status" className="status">{message}</p>}
     <footer>Built for the long game 🌿</footer>
   </main>;
 }
