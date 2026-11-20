@@ -32,8 +32,9 @@ function dateKey(d) { return [d.getFullYear(), String(d.getMonth() + 1).padStart
 // Skip a day and the same workout is simply waiting for you next time.
 const ROTATION = ['middle', 'pancake', 'recovery', 'middle', 'pancake', 'mixed'];
 const FOCUS_LABEL = { middle: 'Middle splits', pancake: 'Pancake', recovery: 'Recovery', mixed: 'Mixed' };
-const ROT_TAG = /^\[rot:(\d+)\]\s*/;
+const ROT_TAG = /^\[rot:(\d+)(?: m:(\d+))?\]\s*/; // e.g. "[rot:2 m:15]" = rotation step + planned minutes
 function sessionRot(s) { const m = s?.notes?.match(ROT_TAG); return m ? Number(m[1]) % ROTATION.length : null; }
+function sessionMinutes(s) { const m = s?.notes?.match(ROT_TAG); return m && m[2] ? m[2] : null; }
 function cleanNotes(n) { return (n || '').replace(ROT_TAG, ''); }
 function nextRotation(sessions) {
   const done = sessions.filter(s => s.completed)
@@ -41,6 +42,44 @@ function nextRotation(sessions) {
   const last = done.find(s => sessionRot(s) != null);
   if (last) return (sessionRot(last) + 1) % ROTATION.length;
   return done.length % ROTATION.length; // sessions from before the rotation existed
+}
+
+const MINUTE_OPTIONS = ['5', '15', '30'];
+function daysBetween(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
+function shortDay(key) { return new Date(key + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' }); }
+function stepMinutes(m, delta) { const i = MINUTE_OPTIONS.indexOf(m); return MINUTE_OPTIONS[Math.max(0, Math.min(MINUTE_OPTIONS.length - 1, i + delta))]; }
+// Picks today's workout from history: days since the last workout, what it was, and the recent streak.
+function planFromHistory(sessions, goalDays, goalMinutes, todayKey) {
+  const done = sessions.filter(s => s.completed);
+  const dates = [...new Set(done.map(s => s.session_date))].sort().reverse();
+  const perSession = Math.max(5, (goalMinutes || 60) / Math.max(1, goalDays || 3));
+  const baseMinutes = perSession >= 22 ? '30' : perSession >= 9 ? '15' : '5';
+  if (!dates.length) return { rot: 0, minutes: baseMinutes, reason: 'First workout: starting with middle splits.' };
+  const last = dates[0];
+  const daysSince = daysBetween(last, todayKey);
+  let streak = 1;
+  while (streak < dates.length && daysBetween(dates[streak], dates[streak - 1]) === 1) streak++;
+  const lastSession = done.filter(s => s.session_date === last).sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''))[0];
+  const lastRot = sessionRot(lastSession);
+  const lastLabel = lastRot != null ? FOCUS_LABEL[ROTATION[lastRot]] : 'workout';
+  const when = daysSince === 0 ? 'today' : daysSince === 1 ? 'yesterday' : daysSince + ' days ago (' + shortDay(last) + ')';
+  let rot = nextRotation(sessions), minutes = baseMinutes, why;
+  const isRecovery = r => ROTATION[r] === 'recovery';
+  if (daysSince <= 1 && streak >= 3 && !isRecovery(rot) && lastRot != null && !isRecovery(lastRot)) {
+    rot = ROTATION.indexOf('recovery');
+    why = streak + ' days in a row, so today is an easier recovery day.';
+  } else if (daysSince >= 8) {
+    rot = ROTATION.indexOf('mixed'); minutes = stepMinutes(baseMinutes, -1);
+    why = 'Welcome back! A shorter mixed session to ease back in.';
+  } else if (daysSince >= 2 && isRecovery(rot)) {
+    rot = (rot + 1) % ROTATION.length;
+    why = 'You’ve already rested, so the recovery day is skipped.';
+  } else if (daysSince >= 4) {
+    why = 'Picking up where you left off.';
+  } else {
+    why = 'Next in your rotation.';
+  }
+  return { rot, minutes, reason: 'Last: ' + lastLabel + ' ' + when + '. ' + why, daysSince };
 }
 
 let audioCtx = null;
@@ -318,8 +357,9 @@ export default function Home() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [exerciseSaving, setExerciseSaving] = useState(false);
-  const [workoutMinutes, setWorkoutMinutes] = useState('15');
+  const [minutesOverride, setMinutesOverride] = useState(null);
   const [focusOverride, setFocusOverride] = useState(null);
+  const [showPlanOptions, setShowPlanOptions] = useState(false);
   const [playerName, setPlayerName] = useState(null);
   const [measurements, setMeasurements] = useState([]);
   const [measurementValue, setMeasurementValue] = useState('');
@@ -338,10 +378,6 @@ export default function Home() {
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [clock, setClock] = useState(Date.now());
 
-  useEffect(() => {
-    try { const m = localStorage.getItem('splits:workoutMinutes'); if (['5', '15', '30'].includes(m)) setWorkoutMinutes(m); } catch {}
-  }, []);
-  function chooseMinutes(m) { setWorkoutMinutes(m); try { localStorage.setItem('splits:workoutMinutes', m); } catch {} }
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -492,11 +528,11 @@ export default function Home() {
     setSaving(true); setMessage('');
     const { data, error } = await supabase.from('sessions').insert({
       user_id: user.id, session_date: dateKey(new Date()), plan_id: null,
-      started_at: new Date().toISOString(), completed: false, notes: '[rot:' + plannedRotation + ']'
+      started_at: new Date().toISOString(), completed: false, notes: '[rot:' + plannedRotation + ' m:' + workoutMinutes + ']'
     }).select('id,session_date,effort,notes,completed,duration_minutes,started_at').single();
     if (error) setMessage(error.message);
     else {
-      setSessions(current => [data, ...current]); setActiveSession(data); setFocusOverride(null);
+      setSessions(current => [data, ...current]); setActiveSession(data); setFocusOverride(null); setMinutesOverride(null); setShowPlanOptions(false);
       setScreen('session'); setSessionStage('exercises');
       if (openName) setPlayerName(openName);
       window.scrollTo?.({ top: 0 });
@@ -562,9 +598,16 @@ export default function Home() {
     }
   }
 
-  const upcomingRotation = nextRotation(sessions);
+  const todayKey = dateKey(new Date());
+  const doneToday = !activeSession && sessions.some(s => s.completed && s.session_date === todayKey);
+  // If today's workout is already done, plan the next one as if it were tomorrow.
+  const planDay = doneToday ? dateKey(new Date(Date.now() + 86400000)) : todayKey;
+  const autoPlan = planFromHistory(sessions.filter(s => s.id !== activeSession?.id), goalDays, goalMinutes, planDay);
+  const upcomingRotation = autoPlan.rot;
   const plannedRotation = focusOverride ?? upcomingRotation;
   const workoutRotation = activeSession ? (sessionRot(activeSession) ?? plannedRotation) : plannedRotation;
+  const workoutMinutes = (activeSession && sessionMinutes(activeSession)) || minutesOverride || autoPlan.minutes;
+  const customized = focusOverride != null || minutesOverride != null;
   const suggestedWorkout = buildWorkout(workoutMinutes, workoutRotation, sessions, exerciseLogs, activeSession?.id);
   const workoutItems = [...carry.map(n => EXERCISES.find(e => e.name === n)).filter(Boolean), ...suggestedWorkout.exercises.filter(e => !carry.includes(e.name))];
   const workoutSeconds = workoutItems.reduce((sum, e) => sum + estimateSeconds(e), 0);
@@ -591,8 +634,15 @@ export default function Home() {
   </div>;
   const timePicker = !activeSession && <div className="chip-row" role="group" aria-label="Time available">
     {[['5', 'Quick · 5'], ['15', 'Regular · 15'], ['30', 'Long · 30']].map(([v, label]) =>
-      <button key={v} className={'chip' + (workoutMinutes === v ? ' selected' : '')} onClick={() => chooseMinutes(v)}>{label} min</button>)}
+      <button key={v} className={'chip' + (workoutMinutes === v ? ' selected' : '')} onClick={() => setMinutesOverride(v === autoPlan.minutes ? null : v)}>{label} min</button>)}
   </div>;
+
+  const planReason = !activeSession && <div className="plan-reason">
+    <p>{doneToday ? '✓ Done for today, nice work. This is what\u2019s planned for next time.' : customized ? 'Your pick for today.' : autoPlan.reason}</p>
+    <button className="link-button" onClick={() => setShowPlanOptions(v => !v)}>{showPlanOptions ? 'Hide options' : 'Change'}</button>
+    {customized && <button className="link-button" onClick={() => { setFocusOverride(null); setMinutesOverride(null); }}>Use suggested</button>}
+  </div>;
+  const planOptions = !activeSession && showPlanOptions && <div className="plan-options">{focusPicker}{timePicker}</div>;
 
   if (!supabase) return <main className="shell"><h1>Middle Splits</h1><p>Set your Supabase environment variables to connect the app.</p></main>;
   if (loading) return <main className="shell"><p>Loading…</p></main>;
@@ -608,13 +658,12 @@ export default function Home() {
       <nav className="app-tabs" aria-label="App sections"><button className={screen === 'home' ? 'selected' : ''} onClick={() => setScreen('home')}>⌂ Home</button><button className={screen === 'session' ? 'selected' : ''} onClick={() => setScreen('session')}>▶ Workout</button><button className={screen === 'history' ? 'selected' : ''} onClick={() => setScreen('history')}>↗ Progress</button></nav>
 
       {screen === 'home' && <section className="panel dashboard-panel">
-        <span className="eyebrow">{activeSession ? 'IN PROGRESS' : 'UP NEXT'}</span>
+        <span className="eyebrow">{activeSession ? 'IN PROGRESS' : doneToday ? 'NEXT TIME' : 'TODAY\u2019S PLAN'}</span>
         <h2>{suggestedWorkout.label}</h2>
         <p>{workoutItems.length} exercises · about {fmtMinutes(activeSession ? remainingSeconds : workoutSeconds)}{activeSession ? ' left' : ''}</p>
-        {focusPicker}
-        {timePicker}
-        <button className="big-start" disabled={saving} onClick={() => startWorkout()}>{saving ? 'Starting…' : activeSession ? '▶ Continue workout' : '▶ Start workout'}</button>
-        <p className="routine-note">Your plan follows your workouts, not the calendar: skip a day and this workout is still waiting. After this: {[1, 2, 3].map(i => FOCUS_LABEL[ROTATION[(workoutRotation + i) % ROTATION.length]]).join(' → ')}.</p>
+        {planReason}{planOptions}
+        <button className={'big-start' + (doneToday ? ' secondary' : '')} disabled={saving} onClick={() => startWorkout()}>{saving ? 'Starting…' : activeSession ? '▶ Continue workout' : doneToday ? '▶ Train again anyway' : '▶ Start workout'}</button>
+        <p className="routine-note">Planned from your history, not the calendar. After this: {[1, 2, 3].map(i => FOCUS_LABEL[ROTATION[(workoutRotation + i) % ROTATION.length]]).join(' → ')}.</p>
         <div className="dashboard-stats"><div><strong>{activeDays}/{goalDays}</strong><span>Active days this week</span></div><div><strong>{weekMinutes}/{goalMinutes}</strong><span>Tracked minutes</span></div><div><strong>{measurements.length ? Number(measurements[measurements.length - 1].value_cm) + ' cm' : '—'}</strong><span>Latest split gap</span></div></div>
       </section>}
 
@@ -641,7 +690,7 @@ export default function Home() {
           {nextUndone && <button className="big-start" onClick={() => openExercise(nextUndone.name)}>▶ {doneCount ? 'Continue' : 'Start'}: {nextUndone.name}</button>}
         </> : <>
           <p>{workoutItems.length} exercises · about {fmtMinutes(workoutSeconds)}. Tap Start, or tap any exercise to jump straight in.</p>
-          {focusPicker}{timePicker}
+          {planReason}{planOptions}
           <button className="big-start" disabled={saving} onClick={() => startWorkout()}>{saving ? 'Starting…' : '▶ Start workout'}</button>
         </>}
 
